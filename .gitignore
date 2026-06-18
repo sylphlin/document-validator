@@ -1,0 +1,26 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Eval workspace (generated during testing, not source)
+*-workspace/
+
+# Packaged skill output
+*.skill
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Temp files
+*.tmp
+*.bak
+/tmp/
