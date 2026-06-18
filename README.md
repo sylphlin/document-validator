@@ -14,23 +14,23 @@ The agent does not simply scan for keywords. It builds a structured compliance p
 flowchart TD
     A([Start]) --> B
 
-    B["**Phase 0 — Intake**\nInventory all documents\nAssign IDs: R1/R2… S1/S2/S3…"]
+    B["Phase 0 — Intake\nInventory all documents\nAssign IDs: Doc-R1/Doc-R2… Doc-S1/Doc-S2/Doc-S3…"]
     B --> C
 
-    C["**Phase 1 — Compliance Profile Extraction**\nParse regulations → extract & classify every requirement\nDisqualifying · Mandatory · Conditional · Advisory"]
+    C["Phase 1 — Compliance Profile Extraction\nParse regulations → extract & classify every requirement\nDisqualifying · Mandatory · Conditional · Advisory"]
     C --> D{User confirms\nprofile}
     D -- Add / adjust --> C
     D -- Confirmed --> E
 
-    E["**Phase 2 — Document Matching & Scoring**\nScore each requirement against the full submission set\nField presence · Keyword match · Numeric · Logic consistency"]
+    E["Phase 2 — Document Matching & Scoring\nScore each requirement against the full submission set\nField presence · Keyword match · Numeric · Logic consistency"]
     E --> F
 
-    F["**Phase 3 — Report Generation**\nExecutive summary · Detailed results table\nGap details · Disposition recommendation"]
+    F["Phase 3 — Report Generation\nExecutive summary · Detailed results table\nGap details · Disposition recommendation"]
     F --> G([End])
 ```
 
 ### Phase 0 — Intake
-The agent inventories all provided documents and assigns short IDs for traceability throughout the report (e.g. `R1`, `R2` for regulations; `S1`, `S2`, `S3` for submission documents). If any document is unstructured or image-based, the agent announces this and proceeds with best-effort extraction.
+The agent inventories all provided documents and assigns short IDs for traceability throughout the report (e.g. `Doc-R1`, `Doc-R2` for regulations; `Doc-S1`, `Doc-S2`, `Doc-S3` for submission documents). If any document is unstructured or image-based, the agent announces this and proceeds with best-effort extraction.
 
 ### Phase 1 — Compliance Profile Extraction
 The agent parses all regulation documents and extracts every requirement, classifying each one by type:
@@ -125,10 +125,10 @@ Overall compliance rate: 72%
 
 | ID | Requirement | Result | Score | Source | Notes |
 |----|-------------|--------|-------|--------|-------|
-| REQ-1 | Applicant identity verified | ✅ | 98% | [S1] §1.1 | |
-| REQ-2 | Project objectives stated | ✅ | 95% | [S1] §2.3 | |
-| REQ-3 | Budget breakdown provided | ⚠️ | 74% | [S3] p.4 | Expenditure categories missing |
-| REQ-4 | Financial statement attached | ✅ | 100% | [S2] | |
+| REQ-1 | Applicant identity verified | ✅ | 98% | [Doc-S1] §1.1 | |
+| REQ-2 | Project objectives stated | ✅ | 95% | [Doc-S1] §2.3 | |
+| REQ-3 | Budget breakdown provided | ⚠️ | 74% | [Doc-S3] p.4 | Expenditure categories missing |
+| REQ-4 | Financial statement attached | ✅ | 100% | [Doc-S2] | |
 | REQ-7 | Declaration letter attached | 🚫 | 0% | — | Not found in any submission doc |
 | REQ-8 | Consent form attached | 🚫 | 0% | — | Not found in any submission doc |
 
@@ -137,7 +137,7 @@ Overall compliance rate: 72%
 | ID | Requirement | Trigger applies? | Result | Score | Source | Notes |
 |----|-------------|-----------------|--------|-------|--------|-------|
 | REQ-14 | Co-applicant authorization letter | No | ➖ N/A | — | — | |
-| REQ-15 | Environmental impact statement | Yes | ⚠️ | 78% | [S3] §5 | Summary only; full assessment not attached |
+| REQ-15 | Environmental impact statement | Yes | ⚠️ | 78% | [Doc-S3] §5 | Summary only; full assessment not attached |
 
 ---
 
@@ -145,13 +145,13 @@ Overall compliance rate: 72%
 
 **REQ-7, REQ-8: Declaration letter and consent form not found in any submission document**
 - What is missing: Both documents are absent from the submission set
-- Regulation reference: [R1] §4(2)
+- Regulation reference: [Doc-R1] §4(2)
 - Deficiency type: Correctable
 - Suggested correction: Attach both documents and resubmit
 
 **REQ-12: Project proposal does not include required budget breakdown**
 - What is missing: Expenditure categories not listed
-- Evidence found in: [S3] p.4 (partial)
-- Regulation reference: [R2] Appendix 1
+- Evidence found in: [Doc-S3] p.4 (partial)
+- Regulation reference: [Doc-R2] Appendix 1
 - Deficiency type: Correctable
-- Suggested correction: Add a line-item budget table per [R2] Appendix 1
+- Suggested correction: Add a line-item budget table per [Doc-R2] Appendix 1

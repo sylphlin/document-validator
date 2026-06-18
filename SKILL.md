@@ -75,16 +75,16 @@ Confirm the inventory before proceeding:
 Document inventory confirmed.
 
 Regulation set:
-  [R1] {name} — primary standard
-  [R2] {name} — {role}
+  [Doc-R1] {name} — primary standard
+  [Doc-R2] {name} — {role}
 
 Submission set:
-  [S1] {name} — main submission
-  [S2] {name} — {role}
-  [S3] {name} — {role}
+  [Doc-S1] {name} — main submission
+  [Doc-S2] {name} — {role}
+  [Doc-S3] {name} — {role}
 ```
 
-Assign short document IDs (R1, R2 for regulation; S1, S2, S3 for submission)
+Assign short document IDs (Doc-R1, Doc-R2 for regulation; Doc-S1, Doc-S2, Doc-S3 for submission)
 for traceability throughout the report.
 
 ### 0.2 Check for Unstructured Documents
@@ -129,7 +129,7 @@ Represent each requirement as a structured record:
 ```
 REQ-{N}
 Type:         Disqualifying / Mandatory / Conditional / Advisory
-Source:       [R{N}] §{section or article reference}
+Source:       [Doc-R{N}] §{section or article reference}
 Requirement:  {One-sentence description of what is required}
 Check method: Field presence / Keyword match / Numeric or format check / Logic consistency
 Trigger:      {For Conditional only — state the condition; leave blank otherwise}
@@ -206,7 +206,7 @@ Use the document IDs assigned in Phase 0.
 When scoring, note the source inline:
 
 ```
-REQ-{N}: evidence found in [S1] §3.2 and [S3] p.7
+REQ-{N}: evidence found in [Doc-S1] §3.2 and [Doc-S3] p.7
 ```
 
 When a requirement is met across multiple documents, list all sources.
@@ -219,7 +219,7 @@ When a submission partially addresses a requirement, show the reasoning inline:
 ```
 [Ambiguous match] REQ-{N}: {requirement description}
 
-Source: [S{N}] {section or page reference}
+Source: [Doc-S{N}] {section or page reference}
 Matched passage: "{quoted text from submission}"
 Score: {X}% — {label}
 Rationale: {what is covered and what is missing}
@@ -240,7 +240,7 @@ Flag for manual review when:
 
 The report language follows the language of the input documents. All descriptive text,
 notes, and suggestions are written in that language. The following identifiers are
-system tracking symbols and are never translated: REQ-N, R1/R2/R3, S1/S2/S3.
+system tracking symbols and are never translated: REQ-N, Doc-R1/Doc-R2/Doc-R3, Doc-S1/Doc-S2/Doc-S3.
 
 ```
 # Submission Validation Report
@@ -271,15 +271,15 @@ Disposition recommendation: {see disposition rules below}
 
 | ID    | Requirement   | Result | Score | Source     | Notes                      |
 |-------|--------------|--------|-------|------------|----------------------------|
-| REQ-1 | {description} | ✅     | 95%   | [S1] §3.1  | {brief note}               |
-| REQ-2 | {description} | ⚠️    | 74%   | [S1] §4.2  | {what is missing or vague} |
+| REQ-1 | {description} | ✅     | 95%   | [Doc-S1] §3.1  | {brief note}               |
+| REQ-2 | {description} | ⚠️    | 74%   | [Doc-S1] §4.2  | {what is missing or vague} |
 | REQ-3 | {description} | 🚫    | 5%    | —          | {not found}                |
 
 ### Conditional Requirements
 
 | ID    | Requirement   | Trigger applies? | Result  | Score | Source    | Notes  |
 |-------|--------------|-----------------|---------|-------|-----------|--------|
-| REQ-X | {description} | Yes              | ⚠️     | 78%   | [S2] §2.1 | {note} |
+| REQ-X | {description} | Yes              | ⚠️     | 78%   | [Doc-S2] §2.1 | {note} |
 | REQ-Y | {description} | No               | ➖ N/A  | —     | —         | —      |
 
 ### Advisory Requirements
@@ -301,8 +301,8 @@ action item instead of repeated entries for the same underlying gap.
 
 **REQ-{N} [, REQ-{N}, ...]: {shared description if consolidated, or individual requirement}**
 - What is missing or insufficient: {specific explanation}
-- Evidence found in: {[S{N}] §{section}, or "not found in any submission document"}
-- Regulation reference: {[R{N}] §{section or article} [, R{N}] §{...} if consolidated}
+- Evidence found in: {[Doc-S{N}] §{section}, or "not found in any submission document"}
+- Regulation reference: {[Doc-R{N}] §{section or article} [, R{N}] §{...} if consolidated}
 - Deficiency type: Correctable / Substantive / Indeterminate
 - Suggested correction: {what the submitting party should add or fix, or "N/A — substantive non-compliance" / "Indeterminate — requires manual review"}
 
@@ -315,7 +315,7 @@ If none, write: "No items require manual review."}
 
 | ID    | Requirement   | Reason for manual review                  | Regulation reference |
 |-------|--------------|-------------------------------------------|----------------------|
-| REQ-{N} | {description} | {why automated scoring was not possible} | [R{N}] §{section}   |
+| REQ-{N} | {description} | {why automated scoring was not possible} | [Doc-R{N}] §{section}   |
 
 ```
 
