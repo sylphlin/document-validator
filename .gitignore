@@ -19,6 +19,19 @@
 __pycache__/
 *.pyc
 *.pyo
+*.egg-info/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Deployment config (project ID, staging bucket, instance ID — not for version control)
+.env
+
+# Test artifacts
+.pytest_cache/
+.coverage
 
 # Temp files
 *.tmp

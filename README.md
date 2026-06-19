@@ -32,9 +32,9 @@ flowchart TD
 ### Phase 0 — Intake
 The agent inventories all provided documents and assigns short IDs for traceability throughout the report (e.g. `Doc-R1`, `Doc-R2` for regulations; `Doc-S1`, `Doc-S2`, `Doc-S3` for submission documents). If any document is unstructured or image-based, the agent announces this and proceeds with best-effort extraction.
 
-Documents that are too large to paste into chat can be provided as a Google Drive link instead (e.g. "Here is the submission document: https://drive.google.com/file/d/.../view"). The agent fetches the file using [`scripts/fetch_drive_file.py`](scripts/fetch_drive_file.py), which calls the Google Drive API directly — no chat-client connector required, so this also works when the skill runs as an agent deployed elsewhere (e.g. Google Agent Engine). It authenticates with Application Default Credentials, exports Google-native documents (Docs/Sheets/Slides) to PDF first so every document follows the same page-citation convention, and expands folder links into one inventory entry per file inside. The target file must be shared with whatever identity those credentials resolve to (the deployed service account, for example) — a public "anyone with the link" share is not required and, for sensitive government filings, usually shouldn't be used.
+Documents that are too large to paste into chat can be provided as a Google Drive link instead (e.g. "Here is the submission document: https://drive.google.com/file/d/.../view"). The agent fetches the file using [`skill/scripts/fetch_drive_file.py`](skill/scripts/fetch_drive_file.py), which calls the Google Drive API directly — no chat-client connector required, so this also works when the skill runs as an agent deployed elsewhere (e.g. Google Agent Engine). It authenticates with Application Default Credentials, exports Google-native documents (Docs/Sheets/Slides) to PDF first so every document follows the same page-citation convention, and expands folder links into one inventory entry per file inside. The target file must be shared with whatever identity those credentials resolve to (the deployed service account, for example) — a public "anyone with the link" share is not required and, for sensitive government filings, usually shouldn't be used.
 
-For PDF inputs, the agent uses [`scripts/extract_pdf_text.py`](scripts/extract_pdf_text.py) to convert each page to Markdown — preserving page numbers for citation, rendering tables as real Markdown tables instead of jumbled text, and flagging pages that look scanned/image-based. Detected images are noted but not extracted, so a reviewer knows to check the original PDF for figures. Large PDFs are pulled in page-range chunks instead of one large dump, so a 100+ page regulation document doesn't need to be loaded all at once.
+For PDF inputs, the agent uses [`skill/scripts/extract_pdf_text.py`](skill/scripts/extract_pdf_text.py) to convert each page to Markdown — preserving page numbers for citation, rendering tables as real Markdown tables instead of jumbled text, and flagging pages that look scanned/image-based. Detected images are noted but not extracted, so a reviewer knows to check the original PDF for figures. Large PDFs are pulled in page-range chunks instead of one large dump, so a 100+ page regulation document doesn't need to be loaded all at once.
 
 ### Phase 1 — Compliance Profile Extraction
 The agent parses all regulation documents and extracts every requirement, classifying each one by type:
@@ -165,3 +165,57 @@ Overall compliance rate: 72%
 - Regulation reference: [Doc-R2] Appendix 1
 - Deficiency type: Correctable
 - Suggested correction: Add a line-item budget table per [Doc-R2] Appendix 1
+
+---
+
+## Project Structure
+
+```
+document-validator/
+├── agent/                  # ADK wrapper — loads skill/SKILL.md as the system prompt
+│   ├── __init__.py         # Exports root_agent for the ADK loader
+│   ├── agent.py            # LlmAgent construction
+│   ├── skill_loader.py     # SKILL.md frontmatter parser
+│   └── tools.py            # run_script and read_asset tools
+├── skill/                  # The skill itself — this is what defines agent behavior
+│   ├── SKILL.md            # Phases, requirement types, report format, execution guidelines
+│   └── scripts/
+│       ├── extract_pdf_text.py   # PDF → Markdown, called via run_script
+│       └── fetch_drive_file.py   # Google Drive API fetch, called via run_script
+├── tests/                  # Wrapper unit tests (agent construction, tool execution)
+├── deploy.sh               # Deploys to Google Cloud Agent Runtime (Agent Engine)
+├── .env.example            # Copy to .env and fill in before deploying
+├── requirements.txt        # Runtime dependencies, installed into the deployed container
+└── pyproject.toml          # Local dev dependencies and test config
+```
+
+This repo is a complete, deployable agent: the [`agent/`](agent/) wrapper is a thin ADK loader (based on [agent-skill-wrapper](https://agentskills.io/specification)) that turns [`skill/SKILL.md`](skill/SKILL.md) into the agent's system prompt and exposes its `scripts/` as a callable tool. Nothing in `agent/` is specific to document validation — changing the agent's behavior means editing `skill/SKILL.md`, not the wrapper code.
+
+## Deployment
+
+**1. Configure:**
+
+```bash
+cp .env.example .env
+```
+
+Edit `.env` — at minimum set `GOOGLE_CLOUD_PROJECT` and `STAGING_BUCKET`. Bump `AGENT_MEMORY` (default `8Gi`) if regulation or submission PDFs run large — the container is silently OOM-killed with no error log if it runs out of memory.
+
+**2. Deploy:**
+
+```bash
+./deploy.sh
+```
+
+This creates a local virtual environment, installs `requirements.txt`, and deploys to Google Cloud Agent Runtime (formerly Vertex AI Agent Engine). Redeploying after the first run updates the same instance (tracked via `AGENT_ENGINE_ID` in `.env`) instead of creating a new one.
+
+**3. Register with Gemini Enterprise** (optional): follow the Reasoning Engine Resource ID printed at the end of `deploy.sh`'s output to connect it as a custom agent in the Gemini Enterprise Admin Console.
+
+**Before deploying for real use:** the Google Drive fetch path requires the deployed service account to actually have access to the files reviewers will link to — see the Phase 0 note above. Share files with the service account's email address; "anyone with the link" is not required and usually shouldn't be used for government filings.
+
+### Local development
+
+```bash
+pip install -e ".[dev]"
+pytest -v
+```

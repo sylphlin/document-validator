@@ -1,0 +1,80 @@
+import os
+import re
+from pathlib import Path
+from dotenv import load_dotenv
+from google.adk.agents import LlmAgent
+from google.genai import types
+from .skill_loader import load_skill
+from .tools import make_tools
+
+load_dotenv()
+
+# Override GOOGLE_CLOUD_LOCATION for model calls (Dockerfile sets us-central1 for Agent Runtime,
+# but gemini-3.5-flash requires the global endpoint)
+os.environ["GOOGLE_GENAI_USE_VERTEXAI"] = "true"
+os.environ["GOOGLE_CLOUD_LOCATION"] = os.getenv("MODEL_LOCATION", "global")
+
+_DEFAULT_SKILL_DIR = Path(os.getenv("SKILL_DIR", str(Path(__file__).parent.parent / "skill")))
+
+
+def _has_files(directory: Path) -> bool:
+    return directory.is_dir() and any(p.is_file() for p in directory.rglob("*"))
+
+
+def build_agent(skill_dir: Path = _DEFAULT_SKILL_DIR) -> LlmAgent:
+    skill_body, metadata = load_skill(skill_dir)
+    timeout = int(os.getenv("SCRIPT_TIMEOUT_SECONDS", "60"))
+    run_script, read_asset = make_tools(skill_dir, timeout=timeout)
+
+    # LlmAgent requires a valid Python identifier as name; sanitize all non-identifier chars
+    raw_name = metadata["name"]
+    sanitized = re.sub(r"[^a-zA-Z0-9]", "_", raw_name)
+    if sanitized and sanitized[0].isdigit():
+        sanitized = "_" + sanitized
+    agent_name = sanitized
+
+    # Only register/advertise a tool if the skill actually bundles content for
+    # it. Mentioning a tool the skill has nothing to back (e.g. no scripts/)
+    # invites the LLM to hallucinate a plausible-sounding filename to call.
+    has_scripts = any((skill_dir / "scripts").glob("*.py"))
+    has_assets = _has_files(skill_dir / "assets") or _has_files(skill_dir / "references")
+
+    tools = []
+    tool_lines = []
+    if has_scripts:
+        tools.append(run_script)
+        tool_lines.append("- run_script: execute a Python script bundled with this skill")
+    if has_assets:
+        tools.append(read_asset)
+        tool_lines.append("- read_asset: read a reference or asset file bundled with this skill")
+
+    full_instruction = skill_body
+    if tool_lines:
+        full_instruction += (
+            "\n---\nYou have access to the following tools when the skill"
+            " instructions require them:\n" + "\n".join(tool_lines) + "\n"
+        )
+
+    return LlmAgent(
+        name=agent_name,
+        model=os.getenv("MODEL", "gemini-3.5-flash"),
+        generate_content_config=types.GenerateContentConfig(
+            thinking_config=types.ThinkingConfig(
+                thinking_level=getattr(
+                    types.ThinkingLevel,
+                    os.getenv("THINKING_LEVEL", "MEDIUM").upper(),
+                    types.ThinkingLevel.MEDIUM,
+                ),
+            ),
+        ),
+        # Passed as a callable (InstructionProvider) so ADK treats it as raw
+        # text and skips {var} session-state templating — skill authors may
+        # write literal curly braces (e.g. example placeholders) in SKILL.md.
+        instruction=lambda ctx: full_instruction,
+        tools=tools,
+    )
+
+
+# Only instantiate if skill/ exists (Task 6 will create it)
+if _DEFAULT_SKILL_DIR.exists():
+    root_agent = build_agent()
