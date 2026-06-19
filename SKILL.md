@@ -62,34 +62,41 @@ Phase 3: Report Generation               ← single standard report
 Large files often cannot be pasted directly into chat, so a Google Drive link is an
 expected input — e.g. "Here is the submission document: https://drive.google.com/file/d/abc123/view".
 When a message contains a `drive.google.com` or `docs.google.com` URL, treat it as a
-document the same way an uploaded file would be treated, fetched via the Drive
-connector instead of read directly from the user's message.
+document the same way an uploaded file would be treated, fetched via
+`scripts/fetch_drive_file.py`.
 
-**1. Extract the file (or folder) ID from the URL.** Common patterns:
+This script calls the Google Drive API directly (not a chat-client connector or MCP
+tool), since this skill may run in environments — such as an ADK agent deployed on
+Google Agent Engine — where no such connector exists. It authenticates with
+Application Default Credentials (ADC): whatever service account or user credential
+is configured in the runtime environment. **The target file must be shared with that
+identity** — for a service account, that means sharing the file with the service
+account's email address specifically, not just "anyone with the link."
 
-| URL shape | ID location |
-|-----------|--------------|
-| `drive.google.com/file/d/{ID}/view` | between `/d/` and the next `/` |
-| `drive.google.com/open?id={ID}` | the `id` query parameter |
-| `docs.google.com/document\|spreadsheets\|presentation/d/{ID}/edit` | between `/d/` and the next `/` |
-| `drive.google.com/drive/folders/{ID}` | after `/folders/` |
+**1. Check what the link points to:**
 
-**2. Look up the file with `get_file_metadata`.** This confirms the link is valid and
-resolves and returns the file's name and MIME type, both needed for the document
-inventory and for deciding how to fetch the content in the next step. If this call
-fails (file not found, no access), tell the user plainly: "I can't access this Drive
-link — please confirm the file exists and is shared (\"Anyone with the link\" or
-shared with the account this connector uses), then send the link again." Do not
-guess at the document's content from the URL or filename alone.
+```
+python3 scripts/fetch_drive_file.py "{drive-url}"
+```
 
-**3. Fetch the content based on MIME type, normalizing to the same pipeline used for uploaded files wherever possible:**
+With no `--out`, this just prints the file's name, MIME type, and size — enough to
+confirm the link resolves and decide how to handle it next. If this fails (file not
+found, no access), tell the user plainly: "I can't access this Drive link — please
+confirm the file exists and is shared with the service account this agent runs as,
+then send the link again." Do not guess at the document's content from the URL or
+filename alone.
 
-| MIME type | How to fetch | Then |
-|-----------|--------------|------|
-| `application/pdf` | `download_file_content` (binary, no `exportMimeType` needed) | Save to a local temp file and run it through §0.4 (PDF extraction) exactly as an uploaded PDF |
-| Google-native (`application/vnd.google-apps.document/spreadsheet/presentation`) | `download_file_content` with `exportMimeType: "application/pdf"` | Save and run through §0.4 — exporting to PDF first keeps page-citation conventions consistent across every document regardless of original source |
-| Other formats (`.docx`, `.xlsx`, `.pptx`, etc.) where PDF export isn't available | `read_file_content` | Use the returned natural-language text directly; note in the inventory that page-level citation may not be available for this document, and cite by section/heading instead |
-| `application/vnd.google-apps.folder` | `search_files` with `parentId = '{folder ID}'` | Treat each file inside as its own inventory entry (regulation or submission, per what the user said the folder contains), and repeat steps 2–3 for each |
+**2. Fetch the content, normalizing everything to the same pipeline used for uploaded files:**
+
+| Target | Command | Then |
+|--------|---------|------|
+| PDF file | `python3 scripts/fetch_drive_file.py "{url}" --out /tmp/{doc-id}.pdf` | Run the saved file through §0.4 (PDF extraction) exactly as an uploaded PDF |
+| Google-native doc (Docs/Sheets/Slides) | Same command — the script auto-exports these to PDF | Run through §0.4 — exporting to PDF first keeps page-citation conventions consistent across every document regardless of original source |
+| Folder link | `python3 scripts/fetch_drive_file.py "{url}" --list-only` | Lists every file inside with its own ID; repeat steps 1–2 for each one as its own inventory entry (regulation or submission, per what the user said the folder contains) |
+
+If a file's format can't be exported to PDF and isn't already a PDF, download it as-is
+and read it directly; note in the inventory that page-level citation may not be
+available for that document, and cite by section/heading instead.
 
 **4. Record provenance in the document inventory** — note that the document came from
 a Drive link rather than a direct upload, so the source is traceable if anyone needs
