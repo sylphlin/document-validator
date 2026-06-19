@@ -32,6 +32,8 @@ flowchart TD
 ### Phase 0 — Intake
 The agent inventories all provided documents and assigns short IDs for traceability throughout the report (e.g. `Doc-R1`, `Doc-R2` for regulations; `Doc-S1`, `Doc-S2`, `Doc-S3` for submission documents). If any document is unstructured or image-based, the agent announces this and proceeds with best-effort extraction.
 
+Documents that are too large to paste into chat can be provided as a Google Drive link instead (e.g. "Here is the submission document: https://drive.google.com/file/d/.../view"). The agent fetches the file through the Drive connector, exports Google-native documents (Docs/Sheets/Slides) to PDF first so every document follows the same page-citation convention, and expands folder links into one inventory entry per file inside.
+
 For PDF inputs, the agent uses [`scripts/extract_pdf_text.py`](scripts/extract_pdf_text.py) to convert each page to Markdown — preserving page numbers for citation, rendering tables as real Markdown tables instead of jumbled text, and flagging pages that look scanned/image-based. Detected images are noted but not extracted, so a reviewer knows to check the original PDF for figures. Large PDFs are pulled in page-range chunks instead of one large dump, so a 100+ page regulation document doesn't need to be loaded all at once.
 
 ### Phase 1 — Compliance Profile Extraction
@@ -86,6 +88,10 @@ Disposition options: *Approve* / *Request correction* / *Return filing* / *Escal
 > - application-form-main.pdf
 > - attachment-1-financial-statement.pdf
 > - attachment-2-project-proposal.pdf
+
+Files too large to paste into chat can be sent as a Google Drive link instead:
+
+> Here is the submission document: https://drive.google.com/file/d/1AbCdEfGhIjKlMnOpQrStUvWxYz/view
 
 **Step 2** — Confirm the compliance profile when prompted:
 

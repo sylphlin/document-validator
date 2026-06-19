@@ -34,6 +34,10 @@ consent letters, or assessment results.
 At least one document on each side is required. If either side is missing, ask the user
 to provide it before proceeding.
 
+Documents can be provided either as direct uploads or as Google Drive links (useful
+when a file is too large to paste into chat) — see §0.1 for how Drive links are
+fetched and processed.
+
 ---
 
 ## Workflow Overview
@@ -53,7 +57,45 @@ Phase 3: Report Generation               ← single standard report
 
 ## Phase 0: Intake
 
-### 0.1 Build the Document Inventory
+### 0.1 Accepting Documents via Google Drive Link
+
+Large files often cannot be pasted directly into chat, so a Google Drive link is an
+expected input — e.g. "Here is the submission document: https://drive.google.com/file/d/abc123/view".
+When a message contains a `drive.google.com` or `docs.google.com` URL, treat it as a
+document the same way an uploaded file would be treated, fetched via the Drive
+connector instead of read directly from the user's message.
+
+**1. Extract the file (or folder) ID from the URL.** Common patterns:
+
+| URL shape | ID location |
+|-----------|--------------|
+| `drive.google.com/file/d/{ID}/view` | between `/d/` and the next `/` |
+| `drive.google.com/open?id={ID}` | the `id` query parameter |
+| `docs.google.com/document\|spreadsheets\|presentation/d/{ID}/edit` | between `/d/` and the next `/` |
+| `drive.google.com/drive/folders/{ID}` | after `/folders/` |
+
+**2. Look up the file with `get_file_metadata`.** This confirms the link is valid and
+resolves and returns the file's name and MIME type, both needed for the document
+inventory and for deciding how to fetch the content in the next step. If this call
+fails (file not found, no access), tell the user plainly: "I can't access this Drive
+link — please confirm the file exists and is shared (\"Anyone with the link\" or
+shared with the account this connector uses), then send the link again." Do not
+guess at the document's content from the URL or filename alone.
+
+**3. Fetch the content based on MIME type, normalizing to the same pipeline used for uploaded files wherever possible:**
+
+| MIME type | How to fetch | Then |
+|-----------|--------------|------|
+| `application/pdf` | `download_file_content` (binary, no `exportMimeType` needed) | Save to a local temp file and run it through §0.4 (PDF extraction) exactly as an uploaded PDF |
+| Google-native (`application/vnd.google-apps.document/spreadsheet/presentation`) | `download_file_content` with `exportMimeType: "application/pdf"` | Save and run through §0.4 — exporting to PDF first keeps page-citation conventions consistent across every document regardless of original source |
+| Other formats (`.docx`, `.xlsx`, `.pptx`, etc.) where PDF export isn't available | `read_file_content` | Use the returned natural-language text directly; note in the inventory that page-level citation may not be available for this document, and cite by section/heading instead |
+| `application/vnd.google-apps.folder` | `search_files` with `parentId = '{folder ID}'` | Treat each file inside as its own inventory entry (regulation or submission, per what the user said the folder contains), and repeat steps 2–3 for each |
+
+**4. Record provenance in the document inventory** — note that the document came from
+a Drive link rather than a direct upload, so the source is traceable if anyone needs
+to re-verify against the original later (e.g. `[Doc-S2] financial_statement.pdf — fetched from Google Drive`).
+
+### 0.2 Build the Document Inventory
 
 Ask the user to identify all documents on each side and their role:
 
@@ -87,13 +129,13 @@ Submission set:
 Assign short document IDs (Doc-R1, Doc-R2 for regulation; Doc-S1, Doc-S2, Doc-S3 for submission)
 for traceability throughout the report.
 
-### 0.2 Check for Unstructured Documents
+### 0.3 Check for Unstructured Documents
 
 If any regulation document is unstructured (not a clean checklist or article list),
 announce: "The regulation document is unstructured. I will parse it to extract all
 reviewable requirements before starting the validation."
 
-### 0.3 Extracting Text from PDF Documents
+### 0.4 Extracting Text from PDF Documents
 
 For PDF documents, use `scripts/extract_pdf_text.py` rather than relying on ad-hoc
 reading. It converts each page to Markdown rather than plain text or JSON — Markdown
@@ -155,8 +197,9 @@ Also extract:
 - **Required terminology** — specific terms the submission must use or reference
 
 When the regulation has a multi-level structure (e.g. chapter → article → paragraph,
-or 章 → 條 → 項/款), the requirement ID itself should mirror that structure using dot
-notation, rather than a flat sequential counter:
+or chapter → article → clause/item, regardless of the labeling convention used in
+the original language), the requirement ID itself should mirror that structure
+using dot notation, rather than a flat sequential counter:
 
 ```
 Top-level item (e.g. Chapter 1, or Article 1 in a flat regulation) → REQ-1
