@@ -128,22 +128,43 @@ def _process_page(page_num):
     return page_num, md, likely_scanned, n_tables
 
 
+def process_pages_sequentially(pdf_path, page_numbers):
+    with pdfplumber.open(pdf_path) as pdf:
+        return {
+            p: extract_page_markdown(pdf.pages[p - 1])
+            for p in page_numbers
+        }
+
+
 def process_pages_in_parallel(pdf_path, page_numbers, workers):
-    """Returns {page_num: (markdown, likely_scanned, n_tables)}, processed across worker processes."""
+    """Returns {page_num: (markdown, likely_scanned, n_tables)}.
+
+    Falls back to sequential processing if the worker pool itself dies (e.g. a
+    worker was OOM-killed processing a page with a large embedded image) rather
+    than failing the whole chunk — slower, but it still finishes. This is also
+    why workers are separate processes rather than threads: a memory spike on
+    one page kills only that worker, not the agent process serving the rest of
+    the conversation.
+    """
     if workers <= 1 or len(page_numbers) <= 1:
-        with pdfplumber.open(pdf_path) as pdf:
-            return {
-                p: extract_page_markdown(pdf.pages[p - 1])
-                for p in page_numbers
-            }
+        return process_pages_sequentially(pdf_path, page_numbers)
 
     results = {}
-    with concurrent.futures.ProcessPoolExecutor(
-        max_workers=workers, initializer=_init_worker, initargs=(pdf_path,)
-    ) as executor:
-        for page_num, md, likely_scanned, n_tables in executor.map(_process_page, page_numbers):
-            results[page_num] = (md, likely_scanned, n_tables)
-    return results
+    try:
+        with concurrent.futures.ProcessPoolExecutor(
+            max_workers=workers, initializer=_init_worker, initargs=(pdf_path,)
+        ) as executor:
+            for page_num, md, likely_scanned, n_tables in executor.map(_process_page, page_numbers):
+                results[page_num] = (md, likely_scanned, n_tables)
+        return results
+    except concurrent.futures.process.BrokenProcessPool:
+        print(
+            f"[warning] worker pool crashed (likely out of memory with {workers} workers) — "
+            "retrying this chunk sequentially with --workers 1. Consider lowering "
+            "PDF_EXTRACT_WORKERS or raising AGENT_MEMORY for this document.",
+            file=sys.stderr,
+        )
+        return process_pages_sequentially(pdf_path, page_numbers)
 
 
 def default_worker_count():
