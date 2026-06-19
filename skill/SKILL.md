@@ -86,7 +86,10 @@ confirm the file exists and is shared with the service account this agent runs a
 then send the link again." Do not guess at the document's content from the URL or
 filename alone.
 
-**2. Fetch the content, normalizing everything to the same pipeline used for uploaded files:**
+**2. Fetch the content, normalizing everything to the same pipeline used for uploaded files.**
+Send a short status message before this call too (e.g. "Downloading {name} from Drive...")
+— like the PDF extraction script, this runs as a blocking call with nothing visible to
+the user until it returns, and a large file can take a while:
 
 | Target | Command | Then |
 |--------|---------|------|
@@ -159,14 +162,28 @@ pages need OCR or manual review:
 python3 scripts/extract_pdf_text.py {file}.pdf --summary-only
 ```
 
-Then extract the content. For documents over roughly 50 pages, pull it in chunks with
-`--start`/`--end` instead of one large dump, so each chunk stays a manageable size to
-read and reason over:
+**Before running this — or any extraction call — send the user a short status
+message first** (e.g. "Scanning {file}.pdf (42 pages)..."). The script runs as a
+blocking call: nothing is visible to the user while it executes, so if the only
+thing they see is silence followed by a sudden result, it reads as if the agent is
+stuck. A one-line heads-up before each call is the only way to avoid that, since the
+script's own internal progress can't be streamed back mid-call.
+
+Then extract the content in chunks using `--start`/`--end`, announcing each chunk
+before running it (e.g. "Processing pages 1-20 of 140..."):
 
 ```
-python3 scripts/extract_pdf_text.py {file}.pdf --start 1 --end 50 --out /tmp/{doc-id}-p1-50.md
-python3 scripts/extract_pdf_text.py {file}.pdf --start 51 --end 100 --out /tmp/{doc-id}-p51-100.md
+python3 scripts/extract_pdf_text.py {file}.pdf --start 1 --end 20 --out /tmp/{doc-id}-p1-20.md
+python3 scripts/extract_pdf_text.py {file}.pdf --start 21 --end 40 --out /tmp/{doc-id}-p21-40.md
 ```
+
+Keep chunks to roughly **20 pages**, not 50 — this isn't just about staying readable,
+it's also about the script's execution timeout (`SCRIPT_TIMEOUT_SECONDS`, configured
+per deployment — see `.env.example`): a chunk that runs long enough to approach that
+limit fails outright with no partial output, which is worse than a slow response. A
+smaller chunk finishes well under the timeout and gives the user a progress update
+more often. If a single chunk still times out (dense tables, very large pages), halve
+the range and retry rather than silently giving up on those pages.
 
 If `--summary-only` reports scanned/image-based pages, follow the "Regulation document
 is image-based or scanned" guidance in Execution Guidelines below for those pages —
@@ -472,9 +489,12 @@ location for every piece of evidence found.
 
 **Submission document is very long (large PDF)**
 Use `scripts/extract_pdf_text.py` with `--start`/`--end` to pull the document in
-page-range chunks rather than extracting the whole file at once. Process each chunk
-in order and announce progress (e.g. "Processed pages 1-50 of 140"). Do not skip
-pages — a missed page is a missed requirement or a missed piece of evidence.
+~20-page chunks rather than extracting the whole file at once (see §0.4 for why —
+chunk size is tied to the script's execution timeout, not just readability).
+Announce each chunk before running it and confirm progress after (e.g. "Processing
+pages 1-20 of 140..." then "Done — moving to pages 21-40"), since the user sees
+nothing while a chunk is running. Do not skip pages — a missed page is a missed
+requirement or a missed piece of evidence.
 
 **Requirement involves subjective judgment**
 Do not assign a score. Flag the item as "Requires manual review" and describe
