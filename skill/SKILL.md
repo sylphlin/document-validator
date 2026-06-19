@@ -162,6 +162,13 @@ pages need OCR or manual review:
 python3 scripts/extract_pdf_text.py {file}.pdf --summary-only
 ```
 
+Pages within a chunk are extracted in parallel across worker processes by default
+(table detection is the slow, CPU-bound part of this script). The worker count comes
+from the deployment's `PDF_EXTRACT_WORKERS` setting (see `.env.example`); pass
+`--workers N` to override it for a specific call, or `--workers 1` to force
+sequential processing if a chunk runs out of memory — each worker holds its own copy
+of the PDF in memory, so more workers means more memory used, not just more speed.
+
 **Before running this — or any extraction call — send the user a short status
 message first** (e.g. "Scanning {file}.pdf (42 pages)..."). The script runs as a
 blocking call: nothing is visible to the user while it executes, so if the only
