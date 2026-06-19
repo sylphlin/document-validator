@@ -93,6 +93,38 @@ If any regulation document is unstructured (not a clean checklist or article lis
 announce: "The regulation document is unstructured. I will parse it to extract all
 reviewable requirements before starting the validation."
 
+### 0.3 Extracting Text from PDF Documents
+
+For PDF documents, use `scripts/extract_pdf_text.py` rather than relying on ad-hoc
+reading. It converts each page to Markdown rather than plain text or JSON — Markdown
+keeps page boundaries intact (needed for citations like "[Doc-S1] p.4"), renders
+tables as real Markdown tables instead of jumbled text, and stays token-efficient
+compared to a JSON structure. Pages with little or no extractable content are
+flagged as likely scanned/image-based, and detected images are noted (their content
+is not extracted) so a reviewer knows to check the original PDF for figures or photos.
+
+First, run a quick scan to see the document's size, table count, and whether any
+pages need OCR or manual review:
+
+```
+python3 scripts/extract_pdf_text.py {file}.pdf --summary-only
+```
+
+Then extract the content. For documents over roughly 50 pages, pull it in chunks with
+`--start`/`--end` instead of one large dump, so each chunk stays a manageable size to
+read and reason over:
+
+```
+python3 scripts/extract_pdf_text.py {file}.pdf --start 1 --end 50 --out /tmp/{doc-id}-p1-50.md
+python3 scripts/extract_pdf_text.py {file}.pdf --start 51 --end 100 --out /tmp/{doc-id}-p51-100.md
+```
+
+If `--summary-only` reports scanned/image-based pages, follow the "Regulation document
+is image-based or scanned" guidance in Execution Guidelines below for those pages —
+do not silently treat them as blank. If a page's table is not detected (e.g. a table
+with no ruling lines), note this and fall back to manual transcription from the
+extracted text for that page.
+
 ---
 
 ## Phase 1: Compliance Profile Extraction
@@ -122,14 +154,32 @@ Also extract:
 - **Format / length limits** — page count, required attachments, referenced forms
 - **Required terminology** — specific terms the submission must use or reference
 
+When the regulation has a multi-level structure (e.g. chapter → article → paragraph,
+or 章 → 條 → 項/款), the requirement ID itself should mirror that structure using dot
+notation, rather than a flat sequential counter:
+
+```
+Top-level item (e.g. Chapter 1, or Article 1 in a flat regulation) → REQ-1
+Sub-item nested under it (e.g. Article 2 of Chapter 1)             → REQ-1.2
+Sub-sub-item nested under that (e.g. Item 3 of that Article)       → REQ-1.2.3
+```
+
+This makes the ID itself traceable to its place in the regulation — anyone reading
+"REQ-1.2.3" immediately knows it's the 3rd item under the 2nd article of chapter 1,
+without needing to separately look up a section reference. Use this numbering
+consistently everywhere a requirement is identified (Compliance Profile, Detailed
+Results, Gap Details, Manual Review queue). If the regulation has only one level of
+structure (a flat list of articles with no sub-items), plain sequential IDs
+(`REQ-1`, `REQ-2`, `REQ-3`...) are sufficient — don't invent nesting that isn't there.
+
 ### 1.2 Build the Compliance Profile
 
 Represent each requirement as a structured record:
 
 ```
-REQ-{N}
+REQ-{hierarchical ID, e.g. 1, 1.2, or 1.2.3}
 Type:         Disqualifying / Mandatory / Conditional / Advisory
-Source:       [Doc-R{N}] §{section or article reference}
+Source:       [Doc-R{N}] {original document label, e.g. "Article 2, Item 3" or page reference}
 Requirement:  {One-sentence description of what is required}
 Check method: Field presence / Keyword match / Numeric or format check / Logic consistency
 Trigger:      {For Conditional only — state the condition; leave blank otherwise}
@@ -206,7 +256,7 @@ Use the document IDs assigned in Phase 0.
 When scoring, note the source inline:
 
 ```
-REQ-{N}: evidence found in [Doc-S1] §3.2 and [Doc-S3] p.7
+REQ-{ID}: evidence found in [Doc-S1] §3.2 and [Doc-S3] p.7
 ```
 
 When a requirement is met across multiple documents, list all sources.
@@ -217,7 +267,7 @@ When no evidence is found in any document, note "not found in any submission doc
 When a submission partially addresses a requirement, show the reasoning inline:
 
 ```
-[Ambiguous match] REQ-{N}: {requirement description}
+[Ambiguous match] REQ-{ID}: {requirement description}
 
 Source: [Doc-S{N}] {section or page reference}
 Matched passage: "{quoted text from submission}"
@@ -240,7 +290,7 @@ Flag for manual review when:
 
 The report language follows the language of the input documents. All descriptive text,
 notes, and suggestions are written in that language. The following identifiers are
-system tracking symbols and are never translated: REQ-N, Doc-R1/Doc-R2/Doc-R3, Doc-S1/Doc-S2/Doc-S3.
+system tracking symbols and are never translated: REQ-{ID} (e.g. REQ-1.2), Doc-R1/Doc-R2/Doc-R3, Doc-S1/Doc-S2/Doc-S3.
 
 ```
 # Submission Validation Report
@@ -269,24 +319,24 @@ Disposition recommendation: {see disposition rules below}
 
 ### Mandatory Requirements
 
-| ID    | Requirement   | Result | Score | Source     | Notes                      |
-|-------|--------------|--------|-------|------------|----------------------------|
-| REQ-1 | {description} | ✅     | 95%   | [Doc-S1] §3.1  | {brief note}               |
-| REQ-2 | {description} | ⚠️    | 74%   | [Doc-S1] §4.2  | {what is missing or vague} |
-| REQ-3 | {description} | 🚫    | 5%    | —          | {not found}                |
+| ID      | Requirement   | Result | Score | Source     | Notes                      |
+|---------|--------------|--------|-------|------------|----------------------------|
+| REQ-1.1 | {description} | ✅     | 95%   | [Doc-S1] §3.1  | {brief note}               |
+| REQ-1.2 | {description} | ⚠️    | 74%   | [Doc-S1] §4.2  | {what is missing or vague} |
+| REQ-2   | {description} | 🚫    | 5%    | —          | {not found}                |
 
 ### Conditional Requirements
 
-| ID    | Requirement   | Trigger applies? | Result  | Score | Source    | Notes  |
-|-------|--------------|-----------------|---------|-------|-----------|--------|
-| REQ-X | {description} | Yes              | ⚠️     | 78%   | [Doc-S2] §2.1 | {note} |
-| REQ-Y | {description} | No               | ➖ N/A  | —     | —         | —      |
+| ID      | Requirement   | Trigger applies? | Result  | Score | Source    | Notes  |
+|---------|--------------|-----------------|---------|-------|-----------|--------|
+| REQ-3.1 | {description} | Yes              | ⚠️     | 78%   | [Doc-S2] §2.1 | {note} |
+| REQ-3.2 | {description} | No               | ➖ N/A  | —     | —         | —      |
 
 ### Advisory Requirements
 
 | ID    | Requirement   | Result           | Notes                              |
 |-------|--------------|------------------|------------------------------------|
-| REQ-Z | {description} | ⚠️ Not followed  | {note — for reference, not scored} |
+| REQ-4 | {description} | ⚠️ Not followed  | {note — for reference, not scored} |
 
 ---
 
@@ -295,14 +345,14 @@ Disposition recommendation: {see disposition rules below}
 {Cover only items scored below 90%.}
 
 When multiple requirements are deficient due to the same missing document or the same
-root cause, consolidate them into a single Gap entry. List all affected REQ-N identifiers
-together. This makes the report easier to act on — the submitting party sees one clear
-action item instead of repeated entries for the same underlying gap.
+root cause, consolidate them into a single Gap entry. List all affected REQ-{ID}
+identifiers together. This makes the report easier to act on — the submitting party
+sees one clear action item instead of repeated entries for the same underlying gap.
 
-**REQ-{N} [, REQ-{N}, ...]: {shared description if consolidated, or individual requirement}**
+**REQ-{ID} [, REQ-{ID}, ...]: {shared description if consolidated, or individual requirement}**
 - What is missing or insufficient: {specific explanation}
 - Evidence found in: {[Doc-S{N}] §{section}, or "not found in any submission document"}
-- Regulation reference: {[Doc-R{N}] §{section or article} [, R{N}] §{...} if consolidated}
+- Regulation reference: {[Doc-R{N}] §{original document label, e.g. "Article 2, Item 3"} [, Doc-R{N}] §{...} if consolidated}
 - Deficiency type: Correctable / Substantive / Indeterminate
 - Suggested correction: {what the submitting party should add or fix, or "N/A — substantive non-compliance" / "Indeterminate — requires manual review"}
 
@@ -313,9 +363,9 @@ action item instead of repeated entries for the same underlying gap.
 {List all items flagged as "Requires manual review" during scoring.
 If none, write: "No items require manual review."}
 
-| ID    | Requirement   | Reason for manual review                  | Regulation reference |
-|-------|--------------|-------------------------------------------|----------------------|
-| REQ-{N} | {description} | {why automated scoring was not possible} | [Doc-R{N}] §{section}   |
+| ID       | Requirement   | Reason for manual review                  | Regulation reference |
+|----------|--------------|-------------------------------------------|----------------------|
+| REQ-{ID} | {description} | {why automated scoring was not possible} | [Doc-R{N}] §{original document label}   |
 
 ```
 
@@ -360,7 +410,8 @@ They are not exceptions — treat them as part of normal execution.
 **Regulation document is image-based or scanned**
 Notify the user that the document appears to be image-based and that a text version
 will give more reliable results. Proceed with best-effort extraction and flag any
-requirements that could not be reliably read.
+requirements that could not be reliably read. `scripts/extract_pdf_text.py --summary-only`
+identifies which specific pages fall into this category before extraction begins.
 
 **Multiple documents provided on either side**
 Treat all regulation documents as a unified standard — requirements may be spread
@@ -369,8 +420,11 @@ as a unified submission — evidence for any requirement may appear in the main
 document or in any attachment. Always record the specific source document ID and
 location for every piece of evidence found.
 
-**Submission document is very long**
-Process section by section and announce progress. Do not skip sections.
+**Submission document is very long (large PDF)**
+Use `scripts/extract_pdf_text.py` with `--start`/`--end` to pull the document in
+page-range chunks rather than extracting the whole file at once. Process each chunk
+in order and announce progress (e.g. "Processed pages 1-50 of 140"). Do not skip
+pages — a missed page is a missed requirement or a missed piece of evidence.
 
 **Requirement involves subjective judgment**
 Do not assign a score. Flag the item as "Requires manual review" and describe

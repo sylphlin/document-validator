@@ -32,6 +32,8 @@ flowchart TD
 ### Phase 0 — Intake
 The agent inventories all provided documents and assigns short IDs for traceability throughout the report (e.g. `Doc-R1`, `Doc-R2` for regulations; `Doc-S1`, `Doc-S2`, `Doc-S3` for submission documents). If any document is unstructured or image-based, the agent announces this and proceeds with best-effort extraction.
 
+For PDF inputs, the agent uses [`scripts/extract_pdf_text.py`](scripts/extract_pdf_text.py) to convert each page to Markdown — preserving page numbers for citation, rendering tables as real Markdown tables instead of jumbled text, and flagging pages that look scanned/image-based. Detected images are noted but not extracted, so a reviewer knows to check the original PDF for figures. Large PDFs are pulled in page-range chunks instead of one large dump, so a 100+ page regulation document doesn't need to be loaded all at once.
+
 ### Phase 1 — Compliance Profile Extraction
 The agent parses all regulation documents and extracts every requirement, classifying each one by type:
 
@@ -41,6 +43,8 @@ The agent parses all regulation documents and extracts every requirement, classi
 | **Mandatory** | Must be present and met unconditionally |
 | **Conditional** | Required only when a specified trigger condition applies |
 | **Advisory** | Recommended but not required; noted without scoring |
+
+When the regulation has a multi-level structure (chapter → article → item), each requirement's ID mirrors that nesting with dot notation — `REQ-1`, `REQ-1.2`, `REQ-1.2.3` — so the ID alone shows where it sits in the regulation, without a separate lookup.
 
 A checkpoint is presented before proceeding — the user can confirm the profile or add missing requirements.
 
@@ -127,29 +131,29 @@ Overall compliance rate: 72%
 |----|-------------|--------|-------|--------|-------|
 | REQ-1 | Applicant identity verified | ✅ | 98% | [Doc-S1] §1.1 | |
 | REQ-2 | Project objectives stated | ✅ | 95% | [Doc-S1] §2.3 | |
-| REQ-3 | Budget breakdown provided | ⚠️ | 74% | [Doc-S3] p.4 | Expenditure categories missing |
-| REQ-4 | Financial statement attached | ✅ | 100% | [Doc-S2] | |
-| REQ-7 | Declaration letter attached | 🚫 | 0% | — | Not found in any submission doc |
-| REQ-8 | Consent form attached | 🚫 | 0% | — | Not found in any submission doc |
+| REQ-3.1.1 | Budget breakdown provided | ⚠️ | 74% | [Doc-S3] p.4 | Expenditure categories missing |
+| REQ-4.1 | Financial statement attached | ✅ | 100% | [Doc-S2] | |
+| REQ-4.2 | Declaration letter attached | 🚫 | 0% | — | Not found in any submission doc |
+| REQ-4.3 | Consent form attached | 🚫 | 0% | — | Not found in any submission doc |
 
 ### Conditional Requirements
 
 | ID | Requirement | Trigger applies? | Result | Score | Source | Notes |
 |----|-------------|-----------------|--------|-------|--------|-------|
-| REQ-14 | Co-applicant authorization letter | No | ➖ N/A | — | — | |
-| REQ-15 | Environmental impact statement | Yes | ⚠️ | 78% | [Doc-S3] §5 | Summary only; full assessment not attached |
+| REQ-5 | Environmental impact statement | Yes | ⚠️ | 78% | [Doc-S3] §5 | Summary only; full assessment not attached |
+| REQ-6 | Co-applicant authorization letter | No | ➖ N/A | — | — | |
 
 ---
 
 ## Gap Details
 
-**REQ-7, REQ-8: Declaration letter and consent form not found in any submission document**
+**REQ-4.2, REQ-4.3: Declaration letter and consent form not found in any submission document**
 - What is missing: Both documents are absent from the submission set
-- Regulation reference: [Doc-R1] §4(2)
+- Regulation reference: [Doc-R1] Article 4, Items 2–3
 - Deficiency type: Correctable
 - Suggested correction: Attach both documents and resubmit
 
-**REQ-12: Project proposal does not include required budget breakdown**
+**REQ-3.1.1: Project proposal does not include required budget breakdown**
 - What is missing: Expenditure categories not listed
 - Evidence found in: [Doc-S3] p.4 (partial)
 - Regulation reference: [Doc-R2] Appendix 1
