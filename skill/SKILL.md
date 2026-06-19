@@ -169,8 +169,7 @@ thing they see is silence followed by a sudden result, it reads as if the agent 
 stuck. A one-line heads-up before each call is the only way to avoid that, since the
 script's own internal progress can't be streamed back mid-call.
 
-Then extract the content in chunks using `--start`/`--end`, announcing each chunk
-before running it (e.g. "Processing pages 1-20 of 140..."):
+Then extract the content in chunks using `--start`/`--end`:
 
 ```
 python3 scripts/extract_pdf_text.py {file}.pdf --start 1 --end 20 --out /tmp/{doc-id}-p1-20.md
@@ -181,9 +180,22 @@ Keep chunks to roughly **20 pages**, not 50 — this isn't just about staying re
 it's also about the script's execution timeout (`SCRIPT_TIMEOUT_SECONDS`, configured
 per deployment — see `.env.example`): a chunk that runs long enough to approach that
 limit fails outright with no partial output, which is worse than a slow response. A
-smaller chunk finishes well under the timeout and gives the user a progress update
-more often. If a single chunk still times out (dense tables, very large pages), halve
-the range and retry rather than silently giving up on those pages.
+smaller chunk finishes well under the timeout. If a single chunk still times out
+(dense tables, very large pages), halve the range and retry rather than silently
+giving up on those pages.
+
+**Process exactly one chunk per conversational turn, then stop and reply** — do not
+call the script for the next chunk within the same turn. The chat surface this skill
+runs behind may apply its own timeout to a single turn that is independent of (and
+often shorter than) `SCRIPT_TIMEOUT_SECONDS`; several chunks run back-to-back inside
+one turn can add up to several minutes even though each individual chunk finished
+quickly, and that aggregate wait is what trips a frontend or gateway timeout — the
+backend keeps working and eventually finishes, but the user-facing surface gives up
+waiting first and shows nothing. Ending the turn after each chunk guarantees every
+single response reaches the user well inside whatever window the platform allows.
+End each turn with a short status and what happens next, e.g.: "Processed pages 1-20
+of 140. Continuing with pages 21-40 next." Resume with the next chunk as soon as the
+conversation continues (no need to wait for the user to say anything specific).
 
 If `--summary-only` reports scanned/image-based pages, follow the "Regulation document
 is image-based or scanned" guidance in Execution Guidelines below for those pages —
@@ -359,6 +371,26 @@ The report language follows the language of the input documents. All descriptive
 notes, and suggestions are written in that language. The following identifiers are
 system tracking symbols and are never translated: REQ-{ID} (e.g. REQ-1.2), Doc-R1/Doc-R2/Doc-R3, Doc-S1/Doc-S2/Doc-S3.
 
+**Deliver the report across multiple turns, not as one single completion.** For a
+submission with dozens of requirements, generating the entire report — every table,
+every Gap entry, every manual-review row — as one block of text can itself take long
+enough that the user-facing surface times out waiting, even though no script is
+involved here and nothing is technically wrong with the generation. The same
+one-step-per-turn principle from §0.4 applies: end a turn after each section below
+and let the conversation continue naturally before producing the next one, rather
+than producing the whole report and only then replying.
+
+A reasonable split:
+1. Executive Summary (short — compliance rate and disposition)
+2. Detailed Results — Mandatory Requirements
+3. Detailed Results — Conditional and Advisory Requirements
+4. Gap Details
+5. Items Requiring Manual Review
+
+Say what's coming next at the end of each part (e.g. "Executive summary above —
+detailed results for the 32 mandatory requirements next."), so the user knows more is
+on the way rather than mistaking a section for the whole report.
+
 ```
 # Submission Validation Report
 
@@ -490,11 +522,11 @@ location for every piece of evidence found.
 **Submission document is very long (large PDF)**
 Use `scripts/extract_pdf_text.py` with `--start`/`--end` to pull the document in
 ~20-page chunks rather than extracting the whole file at once (see §0.4 for why —
-chunk size is tied to the script's execution timeout, not just readability).
-Announce each chunk before running it and confirm progress after (e.g. "Processing
-pages 1-20 of 140..." then "Done — moving to pages 21-40"), since the user sees
-nothing while a chunk is running. Do not skip pages — a missed page is a missed
-requirement or a missed piece of evidence.
+chunk size is tied to the script's execution timeout, not just readability). Process
+one chunk per turn and end the turn after each one (see §0.4) — don't loop through
+several chunks silently within a single turn, since the user-facing surface may time
+out waiting for a response well before the backend itself would. Do not skip pages —
+a missed page is a missed requirement or a missed piece of evidence.
 
 **Requirement involves subjective judgment**
 Do not assign a score. Flag the item as "Requires manual review" and describe
