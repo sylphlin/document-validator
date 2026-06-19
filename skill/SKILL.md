@@ -210,6 +210,19 @@ extracted text for that page.
 **Goal:** Parse the regulation document and produce a structured requirement
 checklist called the Compliance Profile.
 
+**If the regulation was extracted in multiple page-range chunks (§0.4), process those
+chunks one at a time across turns — the same one-step-per-turn principle as §0.4 and
+Phase 3.** Reasoning through every requirement in a large regulation in a single turn
+can take long enough, even before producing any visible output, that the user-facing
+surface times out waiting — there's nothing wrong with the extraction itself, the
+single turn is simply doing too much work at once. Build the Compliance Profile
+incrementally instead: extract requirements from one chunk, report a short running
+count (e.g. "Extracted 14 requirements from pages 1-20. Continuing with pages
+21-40."), then continue with the next chunk in the next turn. Only present the full
+§1.3 checkpoint once every chunk has been processed and the running list is complete.
+For a regulation small enough to have been extracted in a single pass, this can stay
+a single turn as before — chunk only when the source itself was chunked.
+
 ### 1.1 Parse the Regulation Document
 
 Regardless of format, extract and classify every requirement:
