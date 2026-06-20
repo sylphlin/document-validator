@@ -191,6 +191,13 @@ smaller chunk finishes well under the timeout. If a single chunk still times out
 (dense tables, very large pages), halve the range and retry rather than silently
 giving up on those pages.
 
+If a timeout error comes back, look for a "partial stdout/stderr before timeout"
+section in it — the script logs which page each worker started and finished, with
+timing, so the last line logged before the cutoff usually points straight at the
+page that was slow or stuck. Don't just retry blindly; mention the specific page if
+the same one keeps timing out, since that's a sign the page itself needs manual
+review rather than a smaller chunk.
+
 **Process exactly one chunk per conversational turn, then stop and reply** — do not
 call the script for the next chunk within the same turn. The chat surface this skill
 runs behind may apply its own timeout to a single turn that is independent of (and

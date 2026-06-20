@@ -42,8 +42,16 @@ import argparse
 import concurrent.futures
 import os
 import sys
+import time
 
 import pdfplumber
+
+
+def log_progress(message):
+    """Per-page progress to stderr, timestamped, so a hang or crash mid-chunk still
+    leaves a record of which page it got stuck on — stdout is reserved for the
+    actual extracted Markdown, which the caller treats as the result."""
+    print(f"[{time.strftime('%H:%M:%S')}] {message}", file=sys.stderr, flush=True)
 
 # Pages with less than this many characters of text/table content are likely
 # scanned images rather than real text, and should be flagged rather than
@@ -123,15 +131,27 @@ def extract_page_markdown(page):
 
 def _process_page(page_num):
     """Runs inside a worker process — operates on that worker's own PDF handle."""
+    log_progress(f"pid {os.getpid()}: starting page {page_num}")
+    started = time.time()
     page = _worker_pdf.pages[page_num - 1]
     md, likely_scanned, n_tables = extract_page_markdown(page)
+    log_progress(f"pid {os.getpid()}: finished page {page_num} ({time.time() - started:.1f}s)")
     return page_num, md, likely_scanned, n_tables
 
 
+def _extract_with_log(pdf, page_num):
+    log_progress(f"starting page {page_num}")
+    started = time.time()
+    result = extract_page_markdown(pdf.pages[page_num - 1])
+    log_progress(f"finished page {page_num} ({time.time() - started:.1f}s)")
+    return result
+
+
 def process_pages_sequentially(pdf_path, page_numbers):
+    log_progress(f"processing {len(page_numbers)} page(s) sequentially: {page_numbers[0]}-{page_numbers[-1]}")
     with pdfplumber.open(pdf_path) as pdf:
         return {
-            p: extract_page_markdown(pdf.pages[p - 1])
+            p: _extract_with_log(pdf, p)
             for p in page_numbers
         }
 
@@ -149,6 +169,10 @@ def process_pages_in_parallel(pdf_path, page_numbers, workers):
     if workers <= 1 or len(page_numbers) <= 1:
         return process_pages_sequentially(pdf_path, page_numbers)
 
+    log_progress(
+        f"processing {len(page_numbers)} page(s) with {workers} workers: "
+        f"{page_numbers[0]}-{page_numbers[-1]}"
+    )
     results = {}
     try:
         with concurrent.futures.ProcessPoolExecutor(
@@ -158,11 +182,10 @@ def process_pages_in_parallel(pdf_path, page_numbers, workers):
                 results[page_num] = (md, likely_scanned, n_tables)
         return results
     except concurrent.futures.process.BrokenProcessPool:
-        print(
+        log_progress(
             f"[warning] worker pool crashed (likely out of memory with {workers} workers) — "
             "retrying this chunk sequentially with --workers 1. Consider lowering "
-            "PDF_EXTRACT_WORKERS or raising AGENT_MEMORY for this document.",
-            file=sys.stderr,
+            "PDF_EXTRACT_WORKERS or raising AGENT_MEMORY for this document."
         )
         return process_pages_sequentially(pdf_path, page_numbers)
 

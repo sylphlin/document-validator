@@ -33,8 +33,19 @@ def make_tools(skill_dir: Path, timeout: int = 60):
             if result.returncode != 0:
                 return f"[error] {result.stderr}"
             return result.stdout
-        except subprocess.TimeoutExpired:
-            return f"[error] script timed out after {timeout}s"
+        except subprocess.TimeoutExpired as e:
+            # Whatever the script printed before the timeout is still in
+            # e.stdout/e.stderr — surfacing it is the difference between
+            # "timed out, no idea why" and "timed out right after page 14",
+            # since the process is killed with no other record of its progress.
+            partial_stdout = (e.stdout or "").strip()
+            partial_stderr = (e.stderr or "").strip()
+            details = ""
+            if partial_stdout:
+                details += f"\n--- partial stdout before timeout ---\n{partial_stdout}"
+            if partial_stderr:
+                details += f"\n--- partial stderr before timeout ---\n{partial_stderr}"
+            return f"[error] script timed out after {timeout}s{details}"
 
     def read_asset(path: str) -> str:
         """Read a text file from the skill directory."""

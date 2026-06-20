@@ -66,3 +66,15 @@ def test_run_script_rejects_non_python_extension(skill_dir):
     run_script, _ = make_tools(skill_dir)
     result = run_script("run.sh", [])
     assert result.startswith("[error] only Python scripts")
+
+
+def test_run_script_includes_partial_output_on_timeout(skill_dir):
+    (skill_dir / "scripts" / "slow.py").write_text(
+        "import time, sys\n"
+        "print('progress: page 1 done', flush=True)\n"
+        "time.sleep(5)\n"
+    )
+    run_script, _ = make_tools(skill_dir, timeout=1)
+    result = run_script("slow.py", [])
+    assert result.startswith("[error] script timed out after 1s")
+    assert "progress: page 1 done" in result
