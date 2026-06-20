@@ -1,35 +1,39 @@
 ---
 name: document-validator
 description: >
-  Use this skill when a user needs to validate whether a submission document meets
-  a given set of regulations or requirements. Triggers when the user provides a
-  regulation or requirement document AND a submission document to check against it.
-  Also trigger when the user says "validate this document", "check compliance",
-  "review this application", "does this meet the requirements", or anything involving
-  checking a document against rules or standards. Use this skill whenever both a
-  standard and a document to check are present in context, even if the request is
-  phrased casually.
+  Use this skill when a user needs to validate whether a pending document meets
+  a given set of standards or requirements. Triggers when the user provides a
+  criteria document (regulation, tender spec, review-committee comments, etc.) AND a
+  pending document to check against it. Also trigger when the user says "validate
+  this document", "check compliance", "review this application", "does this meet the
+  requirements", or anything involving checking a document against rules or criteria —
+  not necessarily a government regulation. Use this skill whenever both criteria and a
+  document to check are present in context, even if the request is phrased casually.
 ---
 
 # Document Validator Skill
 
 ## Overview
 
-Validates a submission document against a provided regulation or requirement document.
-Produces a structured audit report with confidence-scored gap analysis — every
-requirement gets a coverage score, every gap gets an explanation and a correction
-suggestion. The output is an actionable, defensible audit trail, not just a verdict.
+Validates a pending document against provided criteria. The criteria don't
+have to be a government regulation — they can be any document that defines what's
+required: a tender specification, a review committee's comments, an internal
+checklist, etc. Produces a structured audit report with confidence-scored gap
+analysis — every requirement gets a coverage score, every gap gets an explanation
+and a correction suggestion. The output is an actionable, defensible audit trail,
+not just a verdict.
 
 ---
 
 ## Inputs Required
 
-**Regulation set** — one or more documents that together define the standard to validate against.
-Any format is accepted: article lists, checklists, policy text, tender specs, etc.
+**Criteria Documents** — one or more documents that together define what the pending documents must
+satisfy. Any format is accepted: regulations, article lists, checklists, policy text,
+tender specifications, review-committee comments, etc.
 
-**Submission set** — one or more documents that together form the submission to be reviewed.
-Typically includes a main application document plus attachments such as technical reports,
-consent letters, or assessment results.
+**Pending Documents** — one or more documents that together form what's being checked against
+the criteria. Typically includes a main document (an application, a bid, a project plan)
+plus attachments such as technical reports, consent letters, or assessment results.
 
 At least one document on each side is required. If either side is missing, ask the user
 to provide it before proceeding.
@@ -47,14 +51,14 @@ the subject matter, not the language to respond in.
 
 For Chinese specifically, Traditional and Simplified are different target outputs,
 not interchangeable — match whichever script the user is actually typing in
-(Traditional 繁體 vs Simplified 简体), and keep it consistent for the rest of the
+(Traditional vs Simplified), and keep it consistent for the rest of the
 conversation once established. If the user explicitly asks for a different
 language or script than what they're typing in, honor that instead. If the
 user's language/script cannot be determined from what they've written so far,
 default to Traditional Chinese (zh-TW) rather than guessing toward whichever
 variant is statistically more common in general.
 
-System tracking symbols (REQ-{ID}, Doc-R{N}, Doc-S{N}) are never translated or
+System tracking symbols (REQ-{ID}, C-{N}, P-{N}) are never translated or
 transliterated, regardless of response language — see Phase 3 for the full list.
 
 **A note on running scripts:** every command shown in this document as
@@ -76,7 +80,7 @@ immediately; **`check_job`** polls that `job_id` for its status. Neither tool
 blocks waiting for the script to finish. This matters because the chat surface
 this skill runs behind may apply its own timeout to a single conversational turn
 that has nothing to do with how long a script legitimately needs — extracting a
-140-page regulation, or downloading a 111MB submission file from Drive, can easily
+140-page criteria document, or downloading a 111MB pending document from Drive, can easily
 take longer than that turn-level timeout even though the script itself is working
 correctly. Launching it in the background and polling decouples the two.
 
@@ -111,7 +115,7 @@ every single one.
 
 **Never mention internal tool or script names, file paths, or your own
 troubleshooting process in what you say to the user.** "Still downloading the
-submission file from Drive..." is fine; "checking fetch_drive_file.py's
+file from Drive..." is fine; "checking fetch_drive_file.py's
 parameters to find the best way to read this" or "trying /dev/stdout" is not —
 the user doesn't need or want to know which script, which flag, or what you tried
 that didn't work. Describe what's happening in plain, functional terms: what
@@ -131,9 +135,9 @@ early, say plainly what's still running and that you'll continue automatically.
 ```
 Phase 0: Intake
       ↓
-Phase 1: Compliance Profile Extraction   ← parse regulation → build requirement list
+Phase 1: Criteria Checklist Extraction   ← parse criteria → build requirement list
       ↓  [checkpoint: user confirms]
-Phase 2: Document Matching & Scoring     ← scan submission → score each requirement
+Phase 2: Document Matching & Scoring     ← scan pending documents → score each requirement
                                             (includes logic & consistency check)
       ↓
 Phase 3: Report Generation               ← single standard report
@@ -166,7 +170,7 @@ instead of asking the user to re-upload.
 ### 0.1 Accepting Documents via Google Drive Link
 
 Large files often cannot be pasted directly into chat, so a Google Drive link is an
-expected input — e.g. "Here is the submission document: https://drive.google.com/file/d/abc123/view".
+expected input — e.g. "Here is the pending document: https://drive.google.com/file/d/abc123/view".
 When a message contains a `drive.google.com` or `docs.google.com` URL, treat it as a
 document the same way an uploaded file would be treated, fetched via
 `scripts/fetch_drive_file.py`.
@@ -194,7 +198,7 @@ exists and is shared with the service account this agent runs as, then send the
 link again." Do not guess at the document's content from the URL or filename alone.
 
 **2. Fetch the content, normalizing everything to the same pipeline used for uploaded files.**
-A large file (e.g. a 111MB submission) can take a while to download — start the job,
+A large file (e.g. a 111MB document) can take a while to download — start the job,
 then poll and narrate per the "Calling Scripts" pattern (e.g. "Still downloading
 {name} (111MB) from Drive..." on each check that comes back running):
 
@@ -203,7 +207,7 @@ then poll and narrate per the "Calling Scripts" pattern (e.g. "Still downloading
 | PDF file | `python3 scripts/fetch_drive_file.py "{url}" --out /tmp/{doc-id}.pdf` | Run the saved file through §0.4 (PDF extraction) exactly as an uploaded PDF |
 | Google-native doc (Docs/Sheets/Slides) | Same command — the script auto-exports these to PDF | Run through §0.4 — exporting to PDF first keeps page-citation conventions consistent across every document regardless of original source |
 | Plain-text/Markdown file (not a PDF, not Google-native) | `python3 scripts/fetch_drive_file.py "{url}" --print-content` | Reads the content directly into context — no separate save/extract step needed |
-| Folder link | `python3 scripts/fetch_drive_file.py "{url}" --list-only` | Lists every file inside with its own ID; repeat steps 1–2 for each one as its own inventory entry (regulation or submission, per what the user said the folder contains) |
+| Folder link | `python3 scripts/fetch_drive_file.py "{url}" --list-only` | Lists every file inside with its own ID; repeat steps 1–2 for each one as its own inventory entry (criteria documents or pending documents, per what the user said the folder contains) |
 
 For any other format that can't be exported to PDF and isn't plain text either,
 download it with `--out` and note in the inventory that page-level citation may
@@ -211,7 +215,7 @@ not be available for that document; cite by section/heading instead.
 
 **4. Record provenance in the document inventory** — note that the document came from
 a Drive link rather than a direct upload, so the source is traceable if anyone needs
-to re-verify against the original later (e.g. `[Doc-S2] financial_statement.pdf — fetched from Google Drive`).
+to re-verify against the original later (e.g. `[P-2] financial_statement.pdf — fetched from Google Drive`).
 
 ### 0.2 Build the Document Inventory
 
@@ -220,12 +224,12 @@ Ask the user to identify all documents on each side and their role:
 ```
 Please list all documents you are providing:
 
-Regulation set:
-  - Main regulation: {name}
+Criteria Documents:
+  - Main criteria document: {name}
   - Supporting documents (if any): {name, role}
 
-Submission set:
-  - Main submission: {name}
+Pending Documents:
+  - Main pending document: {name}
   - Attachments (if any): {name, role — e.g. "Appendix A: Traffic Impact Assessment"}
 ```
 
@@ -234,30 +238,30 @@ Confirm the inventory before proceeding:
 ```
 Document inventory confirmed.
 
-Regulation set:
-  [Doc-R1] {name} — primary standard
-  [Doc-R2] {name} — {role}
+Criteria Documents:
+  [C-1] {name} — primary criteria document
+  [C-2] {name} — {role}
 
-Submission set:
-  [Doc-S1] {name} — main submission
-  [Doc-S2] {name} — {role}
-  [Doc-S3] {name} — {role}
+Pending Documents:
+  [P-1] {name} — main pending document
+  [P-2] {name} — {role}
+  [P-3] {name} — {role}
 ```
 
-Assign short document IDs (Doc-R1, Doc-R2 for regulation; Doc-S1, Doc-S2, Doc-S3 for submission)
-for traceability throughout the report.
+Assign short document IDs (C-1, C-2 for the criteria documents; P-1, P-2, P-3
+for the pending documents) for traceability throughout the report.
 
 ### 0.3 Check for Unstructured Documents
 
-If any regulation document is unstructured (not a clean checklist or article list),
-announce: "The regulation document is unstructured. I will parse it to extract all
+If any criteria document is unstructured (not a clean checklist or article list),
+announce: "The criteria document is unstructured. I will parse it to extract all
 reviewable requirements before starting the validation."
 
 ### 0.4 Extracting Text from PDF Documents
 
 For PDF documents, use `scripts/extract_pdf_text.py` rather than relying on ad-hoc
 reading. It converts each page to Markdown rather than plain text or JSON — Markdown
-keeps page boundaries intact (needed for citations like "[Doc-S1] p.4"), renders
+keeps page boundaries intact (needed for citations like "[P-1] p.4"), renders
 tables as real Markdown tables instead of jumbled text, and stays token-efficient
 compared to a JSON structure. Pages with little or no extractable content are
 flagged as likely scanned/image-based, and detected images are noted (their content
@@ -334,7 +338,7 @@ finishing; only end the turn if a chunk is still running after you've given the
 user a few status updates on it, stating which chunk it is and that you'll
 continue automatically.
 
-If `--summary-only` reports scanned/image-based pages, follow the "Regulation document
+If `--summary-only` reports scanned/image-based pages, follow the "Criteria document
 is image-based or scanned" guidance in Execution Guidelines below for those pages —
 do not silently treat them as blank. If a page's table is not detected (e.g. a table
 with no ruling lines), note this and fall back to manual transcription from the
@@ -342,23 +346,23 @@ extracted text for that page.
 
 ---
 
-## Phase 1: Compliance Profile Extraction
+## Phase 1: Criteria Checklist Extraction
 
-**Goal:** Parse the regulation document and produce a structured requirement
-checklist called the Compliance Profile.
+**Goal:** Parse the criteria document(s) and produce a structured requirement
+list called the Criteria Checklist.
 
-**If the regulation was extracted in multiple page-range chunks (§0.4), build the
-Compliance Profile incrementally, one chunk at a time** — narrate progress as you
+**If the criteria document(s) were extracted in multiple page-range chunks (§0.4), build the
+Criteria Checklist incrementally, one chunk at a time** — narrate progress as you
 go (e.g. "Extracted 14 requirements from pages 1-20. Continuing with pages
 21-40.") the same way as §0.4. Reasoning through every requirement in a large
-regulation can take a while even with nothing technically blocking you, so keep
+criteria document can take a while even with nothing technically blocking you, so keep
 narrating at each chunk boundary so the user can see it's moving — stay in the same
 turn across chunks as long as you're making steady progress, and only end the turn
 early if you genuinely need more time than is reasonable for one turn. Only present
 the full §1.3 checkpoint once every chunk has been processed and the running list
 is complete.
 
-**When chunking, checkpoint the running Compliance Profile to GCS after each chunk**
+**When chunking, checkpoint the running Criteria Checklist to GCS after each chunk**
 — it's derived from your own reasoning, not raw document content, so there's no
 cheap way to reconstruct it if the conversation is interrupted long enough for the
 session to expire or land on a different container later. After updating the
@@ -366,14 +370,14 @@ running list, save it (the full structured list built so far, plus which page
 ranges are done and which remain):
 
 ```
-echo '{"requirements": [...], "completed_ranges": ["1-20"], "remaining_ranges": ["21-40"]}' | python3 scripts/gcs_state.py write-state --session-id {session-id} --user-id {user-id} --name compliance_profile
+echo '{"requirements": [...], "completed_ranges": ["1-20"], "remaining_ranges": ["21-40"]}' | python3 scripts/gcs_state.py write-state --session-id {session-id} --user-id {user-id} --name criteria_checklist
 ```
 
 At the very start of Phase 1, before parsing anything, check whether a checkpoint
 already exists for this document:
 
 ```
-python3 scripts/gcs_state.py read-state --session-id {session-id} --user-id {user-id} --name compliance_profile
+python3 scripts/gcs_state.py read-state --session-id {session-id} --user-id {user-id} --name criteria_checklist
 ```
 
 If one is found, resume from the `remaining_ranges` it lists instead of re-parsing
@@ -381,59 +385,59 @@ from page 1. If none is found (the normal case for a fresh validation), proceed 
 described above. Skip both of these calls entirely if `{session-id}`/`{user-id}`
 were not provided — same as §0.0.
 
-### 1.1 Parse the Regulation Document
+### 1.1 Parse the Criteria Documents
 
 Regardless of format, extract and classify every requirement:
 
 | Type | Definition | Notes |
 |------|-----------|-------|
-| **Disqualifying** | Explicitly stated in the regulation as a condition for rejection or non-acceptance | Any failure triggers Return filing immediately, regardless of other scores |
+| **Disqualifying** | Explicitly stated in the criteria as a condition for rejection or non-acceptance | Any failure triggers Return filing immediately, regardless of other scores |
 | **Mandatory** | Must be present or met unconditionally | Failure = deficiency |
 | **Conditional** | Required only when a trigger condition applies | Score only if trigger applies |
 | **Advisory** | Recommended but not required | Note but do not mark as deficient |
 
-When parsing the regulation document, actively scan for explicit disqualifying language
+When parsing the criteria document, actively scan for explicit disqualifying language
 such as "will not be accepted", "shall be rejected", "application is void if",
 or equivalent phrasing in any language. Classify those requirements as Disqualifying.
 
-If no disqualifying conditions are found in the regulation document, note this in the
-Compliance Profile summary and apply the default disposition rules in Phase 3.
+If no disqualifying conditions are found in the criteria, note this in the
+Criteria Checklist summary and apply the default disposition rules in Phase 3.
 
 Also extract:
 - **Format / length limits** — page count, required attachments, referenced forms
-- **Required terminology** — specific terms the submission must use or reference
+- **Required terminology** — specific terms the pending documents must use or reference
 
-When the regulation has a multi-level structure (e.g. chapter → article → paragraph,
+When the criteria have a multi-level structure (e.g. chapter → article → paragraph,
 or chapter → article → clause/item, regardless of the labeling convention used in
 the original language), the requirement ID itself should mirror that structure
 using dot notation, rather than a flat sequential counter:
 
 ```
-Top-level item (e.g. Chapter 1, or Article 1 in a flat regulation) → REQ-1
+Top-level item (e.g. Chapter 1, or Article 1 in a flat set of criteria) → REQ-1
 Sub-item nested under it (e.g. Article 2 of Chapter 1)             → REQ-1.2
 Sub-sub-item nested under that (e.g. Item 3 of that Article)       → REQ-1.2.3
 ```
 
-This makes the ID itself traceable to its place in the regulation — anyone reading
+This makes the ID itself traceable to its place in the criteria — anyone reading
 "REQ-1.2.3" immediately knows it's the 3rd item under the 2nd article of chapter 1,
 without needing to separately look up a section reference. Use this numbering
-consistently everywhere a requirement is identified (Compliance Profile, Detailed
-Results, Gap Details, Manual Review queue). If the regulation has only one level of
+consistently everywhere a requirement is identified (Criteria Checklist, Detailed
+Results, Gap Details, Manual Review queue). If the criteria have only one level of
 structure (a flat list of articles with no sub-items), plain sequential IDs
 (`REQ-1`, `REQ-2`, `REQ-3`...) are sufficient — don't invent nesting that isn't there.
 
-### 1.2 Build the Compliance Profile
+### 1.2 Build the Criteria Checklist
 
 Represent the requirements as a Markdown table, one row per requirement:
 
 | ID | Type | Source | Requirement | Check method | Trigger |
 |----|------|--------|-------------|---------------|---------|
-| REQ-1.2.3 | Mandatory | [Doc-R1] Article 2, Item 3 | {one-sentence description of what is required} | Field presence | — |
-| REQ-3.1 | Conditional | [Doc-R1] Article 4 | {one-sentence description of what is required} | Logic consistency | {the condition that triggers this requirement} |
+| REQ-1.2.3 | Mandatory | [C-1] Article 2, Item 3 | {one-sentence description of what is required} | Field presence | — |
+| REQ-3.1 | Conditional | [C-1] Article 4 | {one-sentence description of what is required} | Logic consistency | {the condition that triggers this requirement} |
 
 - **ID** — the hierarchical REQ-{ID} from §1.1.
 - **Type** — Disqualifying / Mandatory / Conditional / Advisory.
-- **Source** — [Doc-R{N}] plus the original document label (e.g. "Article 2, Item 3" or a page reference).
+- **Source** — [C-{N}] plus the original document label (e.g. "Article 2, Item 3" or a page reference).
 - **Check method** — Field presence / Keyword match / Numeric or format check / Logic consistency.
 - **Trigger** — for Conditional rows only, state the condition; leave as `—` for every other type.
 
@@ -441,12 +445,12 @@ For a long table, build it the same incrementally-across-chunks way as the rest
 of Phase 1 — append rows as each chunk is parsed rather than holding the whole
 table until the end.
 
-### 1.3 Checkpoint — Confirm Compliance Profile
+### 1.3 Checkpoint — Confirm Criteria Checklist
 
 Present a summary before proceeding:
 
 ```
-Compliance Profile ready.
+Criteria Checklist ready.
 
 Total requirements extracted: {N}
   Disqualifying: {N}  ← failure on any of these triggers immediate Return filing
@@ -454,7 +458,7 @@ Total requirements extracted: {N}
   Conditional:   {N}
   Advisory:      {N}
 
-Disqualifying conditions found in regulation: {Yes — list them / No — default rules apply}
+Disqualifying conditions found in criteria: {Yes — list them / No — default rules apply}
 Required terminology: {list}
 
 Please confirm this looks complete. Add any missing requirements before I begin scoring.
@@ -462,13 +466,24 @@ Please confirm this looks complete. Add any missing requirements before I begin 
 
 Wait for user confirmation before moving to Phase 2.
 
+**If the user responds with a change** (add/remove/edit a requirement) instead of a
+plain confirmation: apply the change, then briefly describe what was changed (e.g.
+"Added REQ-7 per your note; removed REQ-3.2 as not applicable"), followed by the
+**entire updated summary** in the same format above, and wait for confirmation
+again. Do not proceed to Phase 2 on the same turn a change was applied; the user
+needs to see the resulting checklist as a whole (a one-line change can shift totals,
+interact with another requirement, or be misapplied) before approving it. Repeat
+this apply → describe → re-present → wait loop for as many rounds as the user keeps
+requesting changes. Only move on once a turn's response is an actual confirmation
+with no further changes requested.
+
 ---
 
 ## Phase 2: Document Matching & Scoring
 
-Scan the submission document and score each requirement in the Compliance Profile.
+Scan the pending documents and score each requirement in the Criteria Checklist.
 
-For a large Compliance Profile, narrate progress in batches as you score (e.g.
+For a large Criteria Checklist, narrate progress in batches as you score (e.g.
 "Scored requirements 1-10 of 42...") rather than going silent until everything is
 scored — see "Calling Scripts" above; this applies even though scoring is your own
 reasoning with no job to poll. Stay in the same turn across batches as long as
@@ -501,7 +516,7 @@ you're making steady progress.
 
 **Logic & Consistency**
 - Do facts in one section contradict facts in another?
-- Do referenced attachments actually exist in the submission?
+- Do referenced attachments actually exist in the pending documents?
 - Are figures, dates, and named parties consistent throughout?
 - Run this check on every validation and surface any contradictions in Gap Details.
 
@@ -518,21 +533,21 @@ Use the document IDs assigned in Phase 0.
 When scoring, note the source inline:
 
 ```
-REQ-{ID}: evidence found in [Doc-S1] §3.2 and [Doc-S3] p.7
+REQ-{ID}: evidence found in [P-1] §3.2 and [P-3] p.7
 ```
 
 When a requirement is met across multiple documents, list all sources.
-When no evidence is found in any document, note "not found in any submission document."
+When no evidence is found in any document, note "not found in any pending document."
 
 ### 2.5 Handling Ambiguous Cases
 
-When a submission partially addresses a requirement, show the reasoning inline:
+When the pending documents partially address a requirement, show the reasoning inline:
 
 ```
 [Ambiguous match] REQ-{ID}: {requirement description}
 
-Source: [Doc-S{N}] {section or page reference}
-Matched passage: "{quoted text from submission}"
+Source: [P-{N}] {section or page reference}
+Matched passage: "{quoted text from the pending documents}"
 Score: {X}% — {label}
 Rationale: {what is covered and what is missing}
 Interpretation applied: {if a reasonable interpretation was used, explain it}
@@ -540,9 +555,9 @@ Flag for manual review: {yes/no — explain if yes}
 ```
 
 Flag for manual review when:
-- The regulation language itself is vague (e.g., "attach relevant documents"
+- The criteria's language itself is vague (e.g., "attach relevant documents"
   without specifying which)
-- The submission's intent is reasonable but wording deviates significantly
+- The pending document's intent is reasonable but wording deviates significantly
   from required terminology
 - A judgment call is needed that exceeds textual analysis
 
@@ -554,11 +569,11 @@ The report follows the same response-language rule as the rest of this skill (se
 "Response Language" above) — it does not switch to the input documents' language
 just because that's what's being analyzed. The following identifiers are system
 tracking symbols and are never translated regardless of language: REQ-{ID} (e.g.
-REQ-1.2), Doc-R1/Doc-R2/Doc-R3, Doc-S1/Doc-S2/Doc-S3.
+REQ-1.2), C-1/C-2/C-3, P-1/P-2/P-3.
 
 **Produce the report section by section, narrating as you go** (see "Calling
 Scripts" above — this applies to your own generation, not just script jobs). For a
-submission with dozens of requirements, generating the entire report — every
+pending documents with dozens of requirements, generating the entire report — every
 table, every Gap entry, every manual-review row — in one uninterrupted block can
 itself take a while even though no script is involved. Say what's coming next
 after each section below; stay in the same turn across sections as long as you're
@@ -577,10 +592,10 @@ detailed results for the 32 mandatory requirements next."), so the user knows mo
 on the way rather than mistaking a section for the whole report.
 
 ```
-# Submission Validation Report
+# Document Validation Report
 
-Submission:   {document name(s)}
-Regulation:   {regulation name(s)}
+Pending document(s):   {document name(s)}
+Criteria:                 {criteria document name(s)}
 Case number:  {if provided by user, otherwise leave blank}
 Review date:  {date}
 
@@ -605,15 +620,15 @@ Disposition recommendation: {see disposition rules below}
 
 | ID      | Requirement   | Result | Score | Source     | Notes                      |
 |---------|--------------|--------|-------|------------|----------------------------|
-| REQ-1.1 | {description} | ✅     | 95%   | [Doc-S1] §3.1  | {brief note}               |
-| REQ-1.2 | {description} | ⚠️    | 74%   | [Doc-S1] §4.2  | {what is missing or vague} |
+| REQ-1.1 | {description} | ✅     | 95%   | [P-1] §3.1  | {brief note}               |
+| REQ-1.2 | {description} | ⚠️    | 74%   | [P-1] §4.2  | {what is missing or vague} |
 | REQ-2   | {description} | 🚫    | 5%    | —          | {not found}                |
 
 ### Conditional Requirements
 
 | ID      | Requirement   | Trigger applies? | Result  | Score | Source    | Notes  |
 |---------|--------------|-----------------|---------|-------|-----------|--------|
-| REQ-3.1 | {description} | Yes              | ⚠️     | 78%   | [Doc-S2] §2.1 | {note} |
+| REQ-3.1 | {description} | Yes              | ⚠️     | 78%   | [P-2] §2.1 | {note} |
 | REQ-3.2 | {description} | No               | ➖ N/A  | —     | —         | —      |
 
 ### Advisory Requirements
@@ -630,15 +645,16 @@ Disposition recommendation: {see disposition rules below}
 
 When multiple requirements are deficient due to the same missing document or the same
 root cause, consolidate them into a single Gap entry. List all affected REQ-{ID}
-identifiers together. This makes the report easier to act on — the submitting party
-sees one clear action item instead of repeated entries for the same underlying gap.
+identifiers together. This makes the report easier to act on — the party that
+submitted the pending documents sees one clear action item instead of repeated entries for
+the same underlying gap.
 
 **REQ-{ID} [, REQ-{ID}, ...]: {shared description if consolidated, or individual requirement}**
 - What is missing or insufficient: {specific explanation}
-- Evidence found in: {[Doc-S{N}] §{section}, or "not found in any submission document"}
-- Regulation reference: {[Doc-R{N}] §{original document label, e.g. "Article 2, Item 3"} [, Doc-R{N}] §{...} if consolidated}
+- Evidence found in: {[P-{N}] §{section}, or "not found in any pending document"}
+- Criteria reference: {[C-{N}] §{original document label, e.g. "Article 2, Item 3"} [, C-{N}] §{...} if consolidated}
 - Deficiency type: Correctable / Substantive / Indeterminate
-- Suggested correction: {what the submitting party should add or fix, or "N/A — substantive non-compliance" / "Indeterminate — requires manual review"}
+- Suggested correction: {what should be added or fixed, or "N/A — substantive non-compliance" / "Indeterminate — requires manual review"}
 
 ---
 
@@ -647,22 +663,22 @@ sees one clear action item instead of repeated entries for the same underlying g
 {List all items flagged as "Requires manual review" during scoring.
 If none, write: "No items require manual review."}
 
-| ID       | Requirement   | Reason for manual review                  | Regulation reference |
+| ID       | Requirement   | Reason for manual review                  | Criteria reference |
 |----------|--------------|-------------------------------------------|----------------------|
-| REQ-{ID} | {description} | {why automated scoring was not possible} | [Doc-R{N}] §{original document label}   |
+| REQ-{ID} | {description} | {why automated scoring was not possible} | [C-{N}] §{original document label}   |
 
 ```
 
 ### Disposition Rules
 
-**Step 1 — Check for regulation-defined criteria**
-If the regulation document defines explicit acceptance or rejection conditions,
+**Step 1 — Check for explicit disposition conditions in the criteria**
+If the criteria documents define explicit acceptance or rejection conditions,
 apply those first. They take precedence over all rules below. Note in the report
-which regulation article the disposition is based on.
+which article or clause of the criteria the disposition is based on.
 
-**Step 2 — Apply default rules if no regulation-defined criteria exist**
-Note in the report: "No explicit disposition criteria found in regulation. Default
-rules applied."
+**Step 2 — Apply default rules if no explicit disposition conditions exist**
+Note in the report: "No explicit disposition criteria found in the criteria documents.
+Default rules applied."
 
 - **Approve** — all Disqualifying and Mandatory requirements are Compliant (≥ 90%),
   and all applicable Conditional requirements are Compliant or Partial (≥ 70%),
@@ -691,7 +707,7 @@ rules applied."
 These are standard situations to anticipate and handle during every validation.
 They are not exceptions — treat them as part of normal execution.
 
-**Regulation document is image-based or scanned**
+**Criteria document is image-based or scanned**
 Notify the user that the document appears to be image-based and that a text version
 will give more reliable results. Proceed with best-effort extraction and flag any
 requirements that could not be reliably read. `scripts/extract_pdf_text.py --summary-only`
@@ -710,13 +726,13 @@ was never provided (see below). Retrying extraction will not fix a page like thi
 needs an actual human to look at the rendered page.
 
 **Multiple documents provided on either side**
-Treat all regulation documents as a unified standard — requirements may be spread
-across the main document and supporting references. Treat all submission documents
-as a unified submission — evidence for any requirement may appear in the main
-document or in any attachment. Always record the specific source document ID and
-location for every piece of evidence found.
+Treat all criteria documents as a unified set of criteria — requirements may be spread
+across the main document and supporting references. Treat all pending documents as a
+single unified set — evidence for any requirement may appear in the main document or
+in any attachment. Always record the specific source document ID and location for
+every piece of evidence found.
 
-**Submission document is very long (large PDF)**
+**Pending document is very long (large PDF)**
 Use `scripts/extract_pdf_text.py` with `--start`/`--end` to pull the document in
 ~20-page chunks rather than extracting the whole file at once (see §0.4 for why —
 chunk size is tied to the script's execution timeout, not just readability). Launch
@@ -727,17 +743,17 @@ missed page is a missed requirement or a missed piece of evidence.
 Do not assign a score. Flag the item as "Requires manual review" and describe
 what the reviewer should look for when making the judgment call.
 
-**Regulation language is vague**
+**Criteria's language is vague**
 State the interpretation applied and flag the item for reviewer confirmation
 before finalizing the verdict on that item.
 
 **Referenced attachment is listed but not provided**
 Flag the item as "Requires manual review." Note that the attachment was referenced
-in the submission but not available for review. Do not assume its contents satisfy
+in the pending documents but not available for review. Do not assume its contents satisfy
 any requirement.
 
 **Date-range compliance checks**
-When a regulation specifies a maximum elapsed time between two dates (e.g. "document
+When the criteria specify a maximum elapsed time between two dates (e.g. "document
 must have been issued within X months of the application date"), always show the
 calculation explicitly before stating the verdict. The required steps are:
 
@@ -745,7 +761,7 @@ calculation explicitly before stating the verdict. The required steps are:
 2. State the stated period (e.g. 3 months)
 3. Compute and state the expiry date by adding the period to the start date using
    calendar months, not fixed day counts
-4. State the reference date to compare against (e.g. application submission date)
+4. State the reference date to compare against (e.g. the date the pending documents were submitted)
 5. Compare the reference date against the expiry date and state the verdict
 
 Example:
