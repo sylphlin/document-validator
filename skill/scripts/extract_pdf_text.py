@@ -83,10 +83,6 @@ class _PageTimeoutError(Exception):
     pass
 
 
-def _alarm_handler(signum, frame):
-    raise _PageTimeoutError()
-
-
 def _extract_page_markdown_with_timeout(page, page_num):
     """Wraps extract_page_markdown with a per-page wall-clock cap.
 
@@ -95,15 +91,32 @@ def _extract_page_markdown_with_timeout(page, page_num):
     no extra process to manage, and Python delivers the signal as soon as
     control returns to the interpreter, which is enough to interrupt CPU-bound
     parsing of a single oversized page without affecting any other page.
+
+    The alarm handler raises _PageTimeoutError, but pdfplumber's lazy layout
+    parsing (triggered by accessing page.lines/.curves/.rects, or
+    .find_tables()/.extract_text()) catches *any* exception mid-parse and
+    re-wraps it as pdfplumber.utils.exceptions.PdfminerException — so the
+    exception that actually reaches here is rarely _PageTimeoutError itself.
+    A flag set by the handler (checked regardless of the final exception
+    type/wrapping) is what actually identifies a timeout; only when that flag
+    is unset does a caught exception get re-raised as a real error.
     """
     if PAGE_TIMEOUT_SECONDS <= 0:
         return extract_page_markdown(page)
 
-    previous_handler = signal.signal(signal.SIGALRM, _alarm_handler)
+    timed_out = {"value": False}
+
+    def alarm_handler(signum, frame):
+        timed_out["value"] = True
+        raise _PageTimeoutError()
+
+    previous_handler = signal.signal(signal.SIGALRM, alarm_handler)
     signal.alarm(PAGE_TIMEOUT_SECONDS)
     try:
         return extract_page_markdown(page)
-    except _PageTimeoutError:
+    except Exception:
+        if not timed_out["value"]:
+            raise
         log_progress(
             f"page {page_num}: timed out after {PAGE_TIMEOUT_SECONDS}s — likely a large or "
             "complex embedded image. Skipping and flagging for manual review."

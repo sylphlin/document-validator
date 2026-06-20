@@ -3,6 +3,7 @@ import re
 from pathlib import Path
 from dotenv import load_dotenv
 from google.adk.agents import LlmAgent
+from google.adk.models import Gemini
 from google.genai import types
 from .skill_loader import load_skill
 from .tools import make_tools
@@ -79,7 +80,19 @@ def build_agent(skill_dir: Path = _DEFAULT_SKILL_DIR) -> LlmAgent:
 
     return LlmAgent(
         name=agent_name,
-        model=os.getenv("MODEL", "gemini-3.5-flash"),
+        # ADK does not retry 429 (RESOURCE_EXHAUSTED) by default — passing a
+        # bare model-name string gets a Gemini wrapper with retry_options=None,
+        # so a single rate-limit response fails the whole turn instead of
+        # backing off and trying again. A long compliance-review conversation
+        # makes enough model calls that hitting a transient 429 is expected,
+        # not exceptional.
+        model=Gemini(
+            model=os.getenv("MODEL", "gemini-3.5-flash"),
+            retry_options=types.HttpRetryOptions(
+                attempts=5, initial_delay=1, max_delay=30, exp_base=2, jitter=1,
+                http_status_codes=[429, 500, 502, 503, 504],
+            ),
+        ),
         generate_content_config=types.GenerateContentConfig(
             thinking_config=types.ThinkingConfig(
                 thinking_level=getattr(

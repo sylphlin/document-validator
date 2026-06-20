@@ -27,10 +27,17 @@ extract_pdf_text.py. There is otherwise no supported way to get a downloaded
 file's content back into context (read_asset only reaches files bundled with the
 skill itself, not anything fetched at runtime) — use this instead of improvising
 a workaround like writing to /dev/stdout.
+
+Drive API calls automatically retry with exponential backoff on transient
+errors (429 rate-limited, 500/502/503/504) — common on large downloads, which
+need many chunk requests and can easily hit per-minute quota. A printed retry
+message mid-run is expected and not a failure; only a final, unrecoverable
+error after retries are exhausted should be treated as one.
 """
 
 import argparse
 import io
+import random
 import re
 import sys
 import time
@@ -42,6 +49,33 @@ from googleapiclient.http import MediaIoBaseDownload
 
 TEXT_MIME_PREFIXES = ("text/",)
 TEXT_MIME_TYPES = {"application/json"}
+
+# Drive API rate-limits per-user/per-project quota with 429s under normal load
+# (not just abuse) — a 100+MB download alone can take dozens of next_chunk()
+# calls, each a fresh quota hit. google-api-python-client doesn't retry these
+# on its own; an uncaught 429 partway through a long download would otherwise
+# crash the whole job rather than just slowing down.
+TRANSIENT_STATUS_CODES = {429, 500, 502, 503, 504}
+MAX_RETRIES = 5
+
+
+def _with_retry(call):
+    """Call a zero-arg API call, retrying transient errors with exponential backoff."""
+    for attempt in range(MAX_RETRIES + 1):
+        try:
+            return call()
+        except HttpError as e:
+            status = getattr(e.resp, "status", None)
+            if status not in TRANSIENT_STATUS_CODES or attempt == MAX_RETRIES:
+                raise
+            delay = (2**attempt) + random.uniform(0, 1)
+            print(
+                f"[{time.strftime('%H:%M:%S')}] Drive API returned {status}, "
+                f"retrying in {delay:.1f}s (attempt {attempt + 1}/{MAX_RETRIES})...",
+                file=sys.stderr,
+                flush=True,
+            )
+            time.sleep(delay)
 
 DRIVE_URL_PATTERNS = [
     r"/file/d/([a-zA-Z0-9_-]+)",
@@ -70,15 +104,15 @@ def get_drive_service():
 
 
 def get_metadata(service, file_id):
-    return service.files().get(fileId=file_id, fields="id, name, mimeType, size").execute()
+    return _with_retry(lambda: service.files().get(fileId=file_id, fields="id, name, mimeType, size").execute())
 
 
 def list_folder(service, folder_id):
     results = []
     page_token = None
     while True:
-        response = (
-            service.files()
+        response = _with_retry(
+            lambda: service.files()
             .list(
                 q=f"'{folder_id}' in parents and trashed = false",
                 fields="nextPageToken, files(id, name, mimeType)",
@@ -103,7 +137,7 @@ def download_text_content(service, file_id):
     downloader = MediaIoBaseDownload(buf, request)
     done = False
     while not done:
-        _, done = downloader.next_chunk()
+        _, done = _with_retry(downloader.next_chunk)
     return buf.getvalue().decode("utf-8", errors="replace")
 
 
@@ -124,7 +158,7 @@ def download_file(service, file_id, mime_type, out_path):
         downloader = MediaIoBaseDownload(f, request)
         done = False
         while not done:
-            status, done = downloader.next_chunk()
+            status, done = _with_retry(downloader.next_chunk)
             if status:
                 percent = int(status.progress() * 100)
                 if percent >= last_logged_percent + 10:
@@ -160,43 +194,55 @@ def main():
         )
         sys.exit(1)
 
-    if meta["mimeType"] == "application/vnd.google-apps.folder":
-        children = list_folder(service, file_id)
-        print(f"Folder: {meta['name']} ({len(children)} file(s))")
-        for c in children:
-            print(f"  {c['id']}  {c['mimeType']:50s}  {c['name']}")
-        if not args.list_only:
+    try:
+        if meta["mimeType"] == "application/vnd.google-apps.folder":
+            children = list_folder(service, file_id)
+            print(f"Folder: {meta['name']} ({len(children)} file(s))")
+            for c in children:
+                print(f"  {c['id']}  {c['mimeType']:50s}  {c['name']}")
+            if not args.list_only:
+                print(
+                    "\nThis is a folder — fetch each file inside individually using its ID above.",
+                    file=sys.stderr,
+                )
+            return
+
+        if args.print_content:
+            if meta["mimeType"].startswith(GOOGLE_NATIVE_MIME_PREFIX):
+                print(
+                    f"'{meta['name']}' is a Google-native document ({meta['mimeType']}). Fetch it "
+                    "with --out instead (it auto-exports to PDF) and read it with extract_pdf_text.py.",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
+            if not is_text_mime(meta["mimeType"]):
+                print(
+                    f"'{meta['name']}' is {meta['mimeType']}, not a plain-text format — --print-content "
+                    "only supports text/Markdown/JSON files. Use --out to save it instead, then "
+                    "extract_pdf_text.py if it's a PDF.",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
+            print(download_text_content(service, file_id))
+            return
+
+        if not args.out:
+            print(f"{meta['name']}  ({meta['mimeType']}, {meta.get('size', '?')} bytes)  id={file_id}")
+            return
+
+        download_file(service, file_id, meta["mimeType"], args.out)
+        print(f"Downloaded '{meta['name']}' ({meta['mimeType']}) to {args.out}", file=sys.stderr)
+    except HttpError as e:
+        status = getattr(e.resp, "status", None)
+        if status in TRANSIENT_STATUS_CODES:
             print(
-                "\nThis is a folder — fetch each file inside individually using its ID above.",
+                f"Drive API kept returning {status} after {MAX_RETRIES} retries — this is likely "
+                "a quota/rate-limit issue, not a problem with the file. Wait a bit and retry.",
                 file=sys.stderr,
             )
-        return
-
-    if args.print_content:
-        if meta["mimeType"].startswith(GOOGLE_NATIVE_MIME_PREFIX):
-            print(
-                f"'{meta['name']}' is a Google-native document ({meta['mimeType']}). Fetch it "
-                "with --out instead (it auto-exports to PDF) and read it with extract_pdf_text.py.",
-                file=sys.stderr,
-            )
-            sys.exit(1)
-        if not is_text_mime(meta["mimeType"]):
-            print(
-                f"'{meta['name']}' is {meta['mimeType']}, not a plain-text format — --print-content "
-                "only supports text/Markdown/JSON files. Use --out to save it instead, then "
-                "extract_pdf_text.py if it's a PDF.",
-                file=sys.stderr,
-            )
-            sys.exit(1)
-        print(download_text_content(service, file_id))
-        return
-
-    if not args.out:
-        print(f"{meta['name']}  ({meta['mimeType']}, {meta.get('size', '?')} bytes)  id={file_id}")
-        return
-
-    download_file(service, file_id, meta["mimeType"], args.out)
-    print(f"Downloaded '{meta['name']}' ({meta['mimeType']}) to {args.out}", file=sys.stderr)
+        else:
+            print(f"Drive API error while fetching '{meta['name']}': {e}", file=sys.stderr)
+        sys.exit(1)
 
 
 if __name__ == "__main__":
