@@ -24,7 +24,7 @@ def _has_files(directory: Path) -> bool:
 def build_agent(skill_dir: Path = _DEFAULT_SKILL_DIR) -> LlmAgent:
     skill_body, metadata = load_skill(skill_dir)
     timeout = int(os.getenv("SCRIPT_TIMEOUT_SECONDS", "60"))
-    run_script, read_asset = make_tools(skill_dir, timeout=timeout)
+    start_job, check_job, read_asset = make_tools(skill_dir, timeout=timeout)
 
     # LlmAgent requires a valid Python identifier as name; sanitize all non-identifier chars
     raw_name = metadata["name"]
@@ -42,8 +42,15 @@ def build_agent(skill_dir: Path = _DEFAULT_SKILL_DIR) -> LlmAgent:
     tools = []
     tool_lines = []
     if has_scripts:
-        tools.append(run_script)
-        tool_lines.append("- run_script: execute a Python script bundled with this skill")
+        tools.append(start_job)
+        tools.append(check_job)
+        tool_lines.append(
+            "- start_job: launch a Python script bundled with this skill in the "
+            "background; returns a job_id immediately without waiting for it to finish"
+        )
+        tool_lines.append(
+            "- check_job: poll a job_id from start_job for its status or result"
+        )
     if has_assets:
         tools.append(read_asset)
         tool_lines.append("- read_asset: read a reference or asset file bundled with this skill")
@@ -53,6 +60,21 @@ def build_agent(skill_dir: Path = _DEFAULT_SKILL_DIR) -> LlmAgent:
         full_instruction += (
             "\n---\nYou have access to the following tools when the skill"
             " instructions require them:\n" + "\n".join(tool_lines) + "\n"
+        )
+
+    def build_instruction(ctx):
+        # ctx is None in unit tests that call agent.instruction(None) directly,
+        # and ctx.session may be absent in other synthetic contexts — both are
+        # fine to ignore, since the IDs are only needed for GCS state scripts,
+        # which the skill instructs the model to skip when it has no IDs to pass.
+        session = getattr(ctx, "session", None)
+        if ctx is None or session is None:
+            return full_instruction
+        return full_instruction + (
+            "\n---\nYour current session ID is: "
+            f"{session.id}\nYour current user ID is: {ctx.user_id}\n"
+            "Pass these as --session-id and --user-id to gcs_state.py when the "
+            "skill instructions call for persisting or restoring state.\n"
         )
 
     return LlmAgent(
@@ -70,7 +92,7 @@ def build_agent(skill_dir: Path = _DEFAULT_SKILL_DIR) -> LlmAgent:
         # Passed as a callable (InstructionProvider) so ADK treats it as raw
         # text and skips {var} session-state templating — skill authors may
         # write literal curly braces (e.g. example placeholders) in SKILL.md.
-        instruction=lambda ctx: full_instruction,
+        instruction=build_instruction,
         tools=tools,
     )
 

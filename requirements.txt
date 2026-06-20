@@ -4,4 +4,5 @@ python-dotenv>=1.0
 a2a-sdk>=0.3.4,<0.4
 google-api-python-client>=2.0.0
 google-auth>=2.0.0
+google-cloud-storage>=2.0.0
 pdfplumber>=0.11.0

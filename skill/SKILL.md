@@ -38,6 +38,57 @@ Documents can be provided either as direct uploads or as Google Drive links (use
 when a file is too large to paste into chat) — see §0.1 for how Drive links are
 fetched and processed.
 
+**A note on running scripts:** every command shown in this document as
+`python3 scripts/{name}.py ...` refers to one of exactly two scripts that exist in
+this skill: `extract_pdf_text.py` and `fetch_drive_file.py`. There is no third
+script for any other step — if a task in this document doesn't name one of these
+two files, it's meant to be done by reasoning directly, not by calling a script.
+Whatever tool actually executes these (a shell, or a `start_job`-style tool) takes
+the bare filename — drop the `scripts/` prefix and the `python3` prefix shown in the
+examples; they're there to make the command copyable, not to be passed literally.
+
+---
+
+## Calling Scripts: Launch, Poll, and Narrate
+
+Every script call in this document goes through two tools instead of one blocking
+call: **`start_job`** launches a script in the background and returns a `job_id`
+immediately; **`check_job`** polls that `job_id` for its status. Neither tool
+blocks waiting for the script to finish. This matters because the chat surface
+this skill runs behind may apply its own timeout to a single conversational turn
+that has nothing to do with how long a script legitimately needs — extracting a
+140-page regulation, or downloading a 111MB submission file from Drive, can easily
+take longer than that turn-level timeout even though the script itself is working
+correctly. Launching it in the background and polling decouples the two.
+
+**The pattern for every script call:**
+1. `start_job` with the script name and its arguments → get back a `job_id`.
+2. `check_job` with that `job_id`:
+   - `[status] running` → tell the user what's in progress (e.g. "Still
+     downloading the 111MB submission file from Drive...") and check again shortly.
+     Repeat for as long as it takes.
+   - the script's actual output → the job is done, move on.
+   - `[error] ...` → handle it per that script's own error guidance (e.g. §0.4's
+     notes on timeout errors).
+3. While one job is running, you can `start_job` additional independent work
+   instead of waiting idle — e.g. the next chunk, or a second document's
+   extraction. They run concurrently in the background.
+
+**Always narrate, even though nothing is technically blocking you.** A background
+job is invisible to the user unless you say something — silence for any noticeable
+stretch reads as "stuck," whether or not a tool call is actually blocking. Give a
+short status line every time you check a job that's still running, and whenever
+you start a new one. This applies just as much when the long-running thing is your
+own reasoning rather than a script — e.g. scoring dozens of requirements in Phase
+2 has no job to poll, but narrate progress at natural checkpoints anyway (e.g.
+"Scored requirements 1–10 of 42...") so the user can see the work is moving.
+
+**End the turn only if something is genuinely still running**, not as a default
+habit after every chunk. If everything you started finishes within the same turn,
+keep going — start the next chunk, keep narrating, and only stop when the phase is
+actually done or something is still in flight. When you do need to end a turn
+early, say plainly what's still running and that you'll continue automatically.
+
 ---
 
 ## Workflow Overview
@@ -57,6 +108,26 @@ Phase 3: Report Generation               ← single standard report
 
 ## Phase 0: Intake
 
+### 0.0 Back Up Directly-Uploaded Files
+
+This skill may run in a deployed agent whose container instance can be swapped out
+between turns — anything written only to local disk can disappear from one turn to
+the next. A file fetched via a Google Drive link (§0.1) doesn't need backing up,
+since it can always be re-fetched from Drive again. A file the user **pasted or
+uploaded directly into the conversation** has no such fallback, so as soon as it's
+saved to local disk, back it up once with:
+
+```
+python3 scripts/gcs_state.py upload-file --session-id {session-id} --user-id {user-id} --file /tmp/{doc-id}.pdf
+```
+
+`{session-id}` and `{user-id}` are given to you at the start of this conversation —
+use them as-is. If they were not provided (e.g. running as a Claude Code skill
+rather than a deployed Agent Engine agent), skip this step entirely; there is no
+container-swap risk to guard against in that environment. If a file ever goes
+missing locally later in the same conversation, restore it with `download-file`
+instead of asking the user to re-upload.
+
 ### 0.1 Accepting Documents via Google Drive Link
 
 Large files often cannot be pasted directly into chat, so a Google Drive link is an
@@ -73,23 +144,24 @@ is configured in the runtime environment. **The target file must be shared with 
 identity** — for a service account, that means sharing the file with the service
 account's email address specifically, not just "anyone with the link."
 
-**1. Check what the link points to:**
+**1. Check what the link points to** (via `start_job`/`check_job` — see "Calling
+Scripts" above):
 
 ```
 python3 scripts/fetch_drive_file.py "{drive-url}"
 ```
 
 With no `--out`, this just prints the file's name, MIME type, and size — enough to
-confirm the link resolves and decide how to handle it next. If this fails (file not
-found, no access), tell the user plainly: "I can't access this Drive link — please
-confirm the file exists and is shared with the service account this agent runs as,
-then send the link again." Do not guess at the document's content from the URL or
-filename alone.
+confirm the link resolves and decide how to handle it next, and to see the file
+size before committing to a download. If this fails (file not found, no access),
+tell the user plainly: "I can't access this Drive link — please confirm the file
+exists and is shared with the service account this agent runs as, then send the
+link again." Do not guess at the document's content from the URL or filename alone.
 
 **2. Fetch the content, normalizing everything to the same pipeline used for uploaded files.**
-Send a short status message before this call too (e.g. "Downloading {name} from Drive...")
-— like the PDF extraction script, this runs as a blocking call with nothing visible to
-the user until it returns, and a large file can take a while:
+A large file (e.g. a 111MB submission) can take a while to download — start the job,
+then poll and narrate per the "Calling Scripts" pattern (e.g. "Still downloading
+{name} (111MB) from Drive..." on each check that comes back running):
 
 | Target | Command | Then |
 |--------|---------|------|
@@ -169,12 +241,9 @@ from the deployment's `PDF_EXTRACT_WORKERS` setting (see `.env.example`); pass
 sequential processing if a chunk runs out of memory — each worker holds its own copy
 of the PDF in memory, so more workers means more memory used, not just more speed.
 
-**Before running this — or any extraction call — send the user a short status
-message first** (e.g. "Scanning {file}.pdf (42 pages)..."). The script runs as a
-blocking call: nothing is visible to the user while it executes, so if the only
-thing they see is silence followed by a sudden result, it reads as if the agent is
-stuck. A one-line heads-up before each call is the only way to avoid that, since the
-script's own internal progress can't be streamed back mid-call.
+Use `start_job`/`check_job` for this call (see "Calling Scripts" above) and narrate
+each check (e.g. "Scanning {file}.pdf (42 pages)...", then "Still scanning..." on
+any check that comes back running).
 
 Then extract the content in chunks using `--start`/`--end`:
 
@@ -198,18 +267,18 @@ page that was slow or stuck. Don't just retry blindly; mention the specific page
 the same one keeps timing out, since that's a sign the page itself needs manual
 review rather than a smaller chunk.
 
-**Process exactly one chunk per conversational turn, then stop and reply** — do not
-call the script for the next chunk within the same turn. The chat surface this skill
-runs behind may apply its own timeout to a single turn that is independent of (and
-often shorter than) `SCRIPT_TIMEOUT_SECONDS`; several chunks run back-to-back inside
-one turn can add up to several minutes even though each individual chunk finished
-quickly, and that aggregate wait is what trips a frontend or gateway timeout — the
-backend keeps working and eventually finishes, but the user-facing surface gives up
-waiting first and shows nothing. Ending the turn after each chunk guarantees every
-single response reaches the user well inside whatever window the platform allows.
-End each turn with a short status and what happens next, e.g.: "Processed pages 1-20
-of 140. Continuing with pages 21-40 next." Resume with the next chunk as soon as the
-conversation continues (no need to wait for the user to say anything specific).
+Launch each chunk via `start_job` and narrate per the "Calling Scripts" pattern.
+**Don't start the next chunk of the same file until the current one finishes** —
+each chunk already uses up to `PDF_EXTRACT_WORKERS` worker processes internally,
+so running two chunks of the same large PDF at once multiplies memory use and
+risks the same out-of-memory failure the worker pool's fallback exists to recover
+from. The "start something else while a job runs" concurrency from "Calling
+Scripts" is for genuinely independent work instead — e.g. extracting a different
+document, or fetching the next file from Drive — not more chunks of the same file.
+Stay in the same turn and keep going chunk after chunk as long as each one keeps
+finishing; only end the turn if a chunk is still running after you've given the
+user a few status updates on it, stating which chunk it is and that you'll
+continue automatically.
 
 If `--summary-only` reports scanned/image-based pages, follow the "Regulation document
 is image-based or scanned" guidance in Execution Guidelines below for those pages —
@@ -224,18 +293,39 @@ extracted text for that page.
 **Goal:** Parse the regulation document and produce a structured requirement
 checklist called the Compliance Profile.
 
-**If the regulation was extracted in multiple page-range chunks (§0.4), process those
-chunks one at a time across turns — the same one-step-per-turn principle as §0.4 and
-Phase 3.** Reasoning through every requirement in a large regulation in a single turn
-can take long enough, even before producing any visible output, that the user-facing
-surface times out waiting — there's nothing wrong with the extraction itself, the
-single turn is simply doing too much work at once. Build the Compliance Profile
-incrementally instead: extract requirements from one chunk, report a short running
-count (e.g. "Extracted 14 requirements from pages 1-20. Continuing with pages
-21-40."), then continue with the next chunk in the next turn. Only present the full
-§1.3 checkpoint once every chunk has been processed and the running list is complete.
-For a regulation small enough to have been extracted in a single pass, this can stay
-a single turn as before — chunk only when the source itself was chunked.
+**If the regulation was extracted in multiple page-range chunks (§0.4), build the
+Compliance Profile incrementally, one chunk at a time** — narrate progress as you
+go (e.g. "Extracted 14 requirements from pages 1-20. Continuing with pages
+21-40.") the same way as §0.4. Reasoning through every requirement in a large
+regulation can take a while even with nothing technically blocking you, so keep
+narrating at each chunk boundary so the user can see it's moving — stay in the same
+turn across chunks as long as you're making steady progress, and only end the turn
+early if you genuinely need more time than is reasonable for one turn. Only present
+the full §1.3 checkpoint once every chunk has been processed and the running list
+is complete.
+
+**When chunking, checkpoint the running Compliance Profile to GCS after each chunk**
+— it's derived from your own reasoning, not raw document content, so there's no
+cheap way to reconstruct it if the conversation is interrupted long enough for the
+session to expire or land on a different container later. After updating the
+running list, save it (the full structured list built so far, plus which page
+ranges are done and which remain):
+
+```
+echo '{"requirements": [...], "completed_ranges": ["1-20"], "remaining_ranges": ["21-40"]}' | python3 scripts/gcs_state.py write-state --session-id {session-id} --user-id {user-id} --name compliance_profile
+```
+
+At the very start of Phase 1, before parsing anything, check whether a checkpoint
+already exists for this document:
+
+```
+python3 scripts/gcs_state.py read-state --session-id {session-id} --user-id {user-id} --name compliance_profile
+```
+
+If one is found, resume from the `remaining_ranges` it lists instead of re-parsing
+from page 1. If none is found (the normal case for a fresh validation), proceed as
+described above. Skip both of these calls entirely if `{session-id}`/`{user-id}`
+were not provided — same as §0.0.
 
 ### 1.1 Parse the Regulation Document
 
@@ -318,6 +408,12 @@ Wait for user confirmation before moving to Phase 2.
 
 Scan the submission document and score each requirement in the Compliance Profile.
 
+For a large Compliance Profile, narrate progress in batches as you score (e.g.
+"Scored requirements 1-10 of 42...") rather than going silent until everything is
+scored — see "Calling Scripts" above; this applies even though scoring is your own
+reasoning with no job to poll. Stay in the same turn across batches as long as
+you're making steady progress.
+
 ### 2.1 Coverage Score Scale
 
 | Score   | Label          | Meaning |
@@ -398,14 +494,14 @@ The report language follows the language of the input documents. All descriptive
 notes, and suggestions are written in that language. The following identifiers are
 system tracking symbols and are never translated: REQ-{ID} (e.g. REQ-1.2), Doc-R1/Doc-R2/Doc-R3, Doc-S1/Doc-S2/Doc-S3.
 
-**Deliver the report across multiple turns, not as one single completion.** For a
-submission with dozens of requirements, generating the entire report — every table,
-every Gap entry, every manual-review row — as one block of text can itself take long
-enough that the user-facing surface times out waiting, even though no script is
-involved here and nothing is technically wrong with the generation. The same
-one-step-per-turn principle from §0.4 applies: end a turn after each section below
-and let the conversation continue naturally before producing the next one, rather
-than producing the whole report and only then replying.
+**Produce the report section by section, narrating as you go** (see "Calling
+Scripts" above — this applies to your own generation, not just script jobs). For a
+submission with dozens of requirements, generating the entire report — every
+table, every Gap entry, every manual-review row — in one uninterrupted block can
+itself take a while even though no script is involved. Say what's coming next
+after each section below; stay in the same turn across sections as long as you're
+producing steady output, and only end a turn early if generation is genuinely
+taking long enough that a status update is overdue.
 
 A reasonable split:
 1. Executive Summary (short — compliance rate and disposition)
@@ -549,11 +645,9 @@ location for every piece of evidence found.
 **Submission document is very long (large PDF)**
 Use `scripts/extract_pdf_text.py` with `--start`/`--end` to pull the document in
 ~20-page chunks rather than extracting the whole file at once (see §0.4 for why —
-chunk size is tied to the script's execution timeout, not just readability). Process
-one chunk per turn and end the turn after each one (see §0.4) — don't loop through
-several chunks silently within a single turn, since the user-facing surface may time
-out waiting for a response well before the backend itself would. Do not skip pages —
-a missed page is a missed requirement or a missed piece of evidence.
+chunk size is tied to the script's execution timeout, not just readability). Launch
+and narrate each chunk per §0.4's pattern, one at a time. Do not skip pages — a
+missed page is a missed requirement or a missed piece of evidence.
 
 **Requirement involves subjective judgment**
 Do not assign a score. Flag the item as "Requires manual review" and describe
