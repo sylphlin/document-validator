@@ -14,24 +14,19 @@ The agent does not simply scan for keywords. It builds a structured criteria che
 flowchart TD
     A([Start]) --> B
 
-    B["Phase 0 — Intake\nInventory documents, assign IDs (C-1/C-2…, P-1/P-2/P-3…)\nFetch uploads or Drive links · extract PDFs to Markdown"]
+    B["Phase 0 — Intake\n0.0 Back Up Directly-Uploaded Files\n0.1 Accepting Documents via Drive Link\n0.2 Build the Document Inventory\n0.3 Check for Unstructured Documents\n0.4 Extracting Text from PDF Documents"]
     B --> C
 
-    C["Phase 1 — Criteria Checklist Extraction\nParse criteria → extract & classify every requirement\nDisqualifying · Mandatory · Conditional · Advisory"]
+    C["Phase 1 — Criteria Checklist Extraction\n1.1 Parse the Criteria Documents\n1.2 Build the Criteria Checklist\n1.3 Checkpoint — Confirm Criteria Checklist"]
     C --> D{User confirms\nchecklist?}
     D -- Requests a change --> C
     D -- Confirmed --> E
 
-    E["Phase 2 — Document Matching & Scoring\nScore each requirement against the pending documents\nField presence · Keyword match · Numeric · Logic consistency"]
+    E["Phase 2 — Document Matching & Scoring\n2.1 Coverage Score Scale\n2.2 Scoring Logic by Check Method\n2.3 Handling Conditional Requirements\n2.4 Source Tracking\n2.5 Handling Ambiguous Cases"]
     E --> F
 
-    F["Phase 3 — Report Generation\nExecutive summary · Detailed results\nGap details · Manual review queue"]
-    F --> G{Disposition}
-
-    G -- "all Disqualifying/Mandatory\ncompliant, no contradictions" --> H([Approve])
-    G -- "correctable gaps only" --> I([Request correction])
-    G -- "Disqualifying failed or\nSubstantive non-compliance" --> J([Return filing])
-    G -- "needs human judgment" --> K([Escalate for review])
+    F["Phase 3 — Report Generation\nExecutive Summary · Detailed Results\nGap Details · Manual Review Queue\nDisposition Rules: Approve · Request correction · Return filing · Escalate for review"]
+    F --> G([End])
 ```
 
 ### Phase 0 — Intake
@@ -92,14 +87,7 @@ scenarios:
 >
 > Criteria Documents:
 > - subsidy-program-guidelines.pdf — https://drive.google.com/file/d/1AbCdEfGhIjKlMnOpQrStUvWxYz/view
-> - application-format-requirements.md — pasted below:
->
-> ```
-> # Application Format Requirements
-> 1. Cover page with applicant name, business license number, and submission date
-> 2. Project proposal: max 10 pages, must include a line-item budget table
-> 3. Required attachments: financial statement, project proposal, declaration letter
-> ```
+> - application-format-requirements.md
 >
 > Pending Documents:
 > - application-form-main.pdf — https://drive.google.com/file/d/1QwErTyUiOpAsDfGhJkLzXcVbNm/view
@@ -111,10 +99,10 @@ scenarios:
 > Check whether this vendor's bid meets every mandatory requirement in our tender spec:
 >
 > Criteria Documents:
-> - tender-specification.pdf — https://drive.google.com/file/d/1TenderSpecAbCdEfGhIjKlMnOp/view
+> - tender-notice.pdf — https://drive.google.com/file/d/1TenderSpecAbCdEfGhIjKlMnOp/view
 >
 > Pending Documents:
-> - vendor-bid-acme-corp.pdf — https://drive.google.com/file/d/1VendorBidAbCdEfGhIjKlMnOp/view
+> - vendor-proposal.pdf — https://drive.google.com/file/d/1VendorBidAbCdEfGhIjKlMnOp/view
 
 ### Scenario: Committee Feedback Review
 
