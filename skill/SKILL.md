@@ -267,6 +267,13 @@ page that was slow or stuck. Don't just retry blindly; mention the specific page
 the same one keeps timing out, since that's a sign the page itself needs manual
 review rather than a smaller chunk.
 
+A single page — usually one with a large or complex embedded image — can also
+get individually capped: if a page takes longer than `PDF_PAGE_TIMEOUT_SECONDS`
+(default 30s, see `.env.example`), the script skips just that page and marks it
+"*[Page processing timed out...]*" instead of letting it stall the whole chunk.
+Treat pages flagged this way the same as scanned/image-based pages — they need
+manual review, and retrying the same chunk won't fix them.
+
 Launch each chunk via `start_job` and narrate per the "Calling Scripts" pattern.
 **Don't start the next chunk of the same file until the current one finishes** —
 each chunk already uses up to `PDF_EXTRACT_WORKERS` worker processes internally,
@@ -634,6 +641,18 @@ Notify the user that the document appears to be image-based and that a text vers
 will give more reliable results. Proceed with best-effort extraction and flag any
 requirements that could not be reliably read. `scripts/extract_pdf_text.py --summary-only`
 identifies which specific pages fall into this category before extraction begins.
+
+**A page could not be read (scanned, technical drawing, or timed out)**
+`scripts/extract_pdf_text.py` flags pages it could not meaningfully process — scanned
+images, dense CAD drawings/3D renderings, or a page that hit `PDF_PAGE_TIMEOUT_SECONDS`
+— with an explicit note in the extracted Markdown instead of silently producing nothing.
+If a requirement's evidence would be expected on one of these pages, flag that
+requirement as "Requires manual review" and say which page and why (e.g. "p.9 — page is
+a technical drawing, content not extracted"). **Never mark a requirement as satisfied
+just because an unreadable page exists where a diagram or attachment was expected** —
+its presence is not evidence of its content, the same as a referenced attachment that
+was never provided (see below). Retrying extraction will not fix a page like this; it
+needs an actual human to look at the rendered page.
 
 **Multiple documents provided on either side**
 Treat all regulation documents as a unified standard — requirements may be spread

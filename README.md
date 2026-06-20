@@ -184,6 +184,10 @@ document-validator/
 │       ├── fetch_drive_file.py   # Google Drive API fetch, launched via start_job/check_job
 │       └── gcs_state.py          # Backs up files/state with no other durable source to GCS
 ├── tests/                  # Wrapper unit tests (agent construction, tool execution)
+│   └── eval/                     # Behavior-level eval (see "Evaluation" below) — not pytest
+│       ├── datasets/basic-dataset.json  # Eval cases — inline regulation + submission text
+│       └── eval_config.yaml             # Custom metrics: disposition correctness, etc.
+├── agents-cli-manifest.yaml  # Lets `agents-cli` (eval/dev-loop tooling) find agent/
 ├── deploy.sh               # Deploys to Google Cloud Agent Runtime (Agent Engine)
 ├── .env.example            # Copy to .env and fill in before deploying
 ├── requirements.txt        # Runtime dependencies, installed into the deployed container
@@ -191,6 +195,17 @@ document-validator/
 ```
 
 This repo is a complete, deployable agent: the [`agent/`](agent/) wrapper is a thin ADK loader (based on [agent-skill-wrapper](https://agentskills.io/specification)) that turns [`skill/SKILL.md`](skill/SKILL.md) into the agent's system prompt and exposes its `scripts/` as a callable tool. Nothing in `agent/` is specific to document validation — changing the agent's behavior means editing `skill/SKILL.md`, not the wrapper code.
+
+## Evaluation
+
+`tests/test_*.py` only checks wrapper mechanics (does `start_job` execute a script, does path traversal get rejected) — it never asserts on what the agent actually decides, since LLM output is non-deterministic and that kind of pytest assertion is flaky by nature. Whether the compliance/gap-analysis logic itself is *correct* — right disposition, right gap identified — is validated separately via [`google-agents-cli`](https://pypi.org/project/google-agents-cli/)'s eval tooling:
+
+```bash
+agents-cli eval generate   # runs the real agent over tests/eval/datasets/basic-dataset.json
+agents-cli eval grade      # scores the traces against tests/eval/eval_config.yaml's metrics
+```
+
+Requires `gcloud auth application-default login` and a `GOOGLE_CLOUD_PROJECT` (pass `--project` to override) — this calls the real Gemini model. The three seeded cases cover an approve, a missing-mandatory-requirement, and a disqualifying-condition case; add more under `tests/eval/datasets/` as the skill grows. See `agents-cli eval --help` and the `google-agents-cli-eval` skill for the dataset schema, metric authoring, and the iterate-on-failures workflow.
 
 ## Deployment
 

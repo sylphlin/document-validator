@@ -1,4 +1,6 @@
 # agent/tools.py
+import os
+import signal
 import subprocess
 import sys
 import threading
@@ -29,30 +31,44 @@ def make_tools(skill_dir: Path, timeout: int = 60):
     jobs_lock = threading.Lock()
 
     def _run_job(job_id: str, script_path: Path, args: list[str]):
+        # Use Popen directly (not subprocess.run) so a timeout can kill the
+        # whole process group, not just this one PID. subprocess.run's own
+        # timeout handling only kills the direct child — a script that spawns
+        # its own workers (e.g. extract_pdf_text.py's ProcessPoolExecutor)
+        # would leave those workers orphaned and still running, still holding
+        # their memory, with nothing left to clean them up.
+        process = subprocess.Popen(
+            [sys.executable, str(script_path)] + list(args),
+            cwd=str(skill_dir),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            start_new_session=True,
+        )
         try:
-            result = subprocess.run(
-                [sys.executable, str(script_path)] + list(args),
-                cwd=str(skill_dir),
-                capture_output=True,
-                text=True,
-                timeout=timeout,
-            )
+            stdout, stderr = process.communicate(timeout=timeout)
             with jobs_lock:
                 jobs[job_id] = {
-                    "status": "done" if result.returncode == 0 else "failed",
-                    "stdout": result.stdout,
-                    "stderr": result.stderr,
+                    "status": "done" if process.returncode == 0 else "failed",
+                    "stdout": stdout,
+                    "stderr": stderr,
                 }
-        except subprocess.TimeoutExpired as e:
-            # Whatever the script printed before the timeout is still in
-            # e.stdout/e.stderr — surfacing it is the difference between
-            # "timed out, no idea why" and "timed out right after page 14",
-            # since the process is killed with no other record of its progress.
+        except subprocess.TimeoutExpired:
+            try:
+                os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            # Whatever the script printed before the timeout is still
+            # recoverable via communicate() after the kill — surfacing it is
+            # the difference between "timed out, no idea why" and "timed out
+            # right after page 14", since the process is killed with no
+            # other record of its progress.
+            stdout, stderr = process.communicate()
             with jobs_lock:
                 jobs[job_id] = {
                     "status": "failed",
-                    "stdout": e.stdout or "",
-                    "stderr": e.stderr or "",
+                    "stdout": stdout or "",
+                    "stderr": stderr or "",
                     "error": f"script timed out after {timeout}s",
                 }
         except Exception as e:

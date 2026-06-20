@@ -125,3 +125,31 @@ def test_check_job_includes_partial_output_on_timeout(skill_dir):
     result = _wait_for_result(check_job, job_id, timeout=5)
     assert result.startswith("[error] script timed out after 1s")
     assert "progress: page 1 done" in result
+
+
+def test_timeout_kills_grandchild_processes(skill_dir, tmp_path):
+    # A script that spawns its own subprocess (like extract_pdf_text.py's
+    # ProcessPoolExecutor workers) — on timeout, the grandchild must die too,
+    # not just the direct child, or it's orphaned and keeps holding memory.
+    heartbeat = tmp_path / "heartbeat.txt"
+    (skill_dir / "scripts" / "spawn_child.py").write_text(
+        "import subprocess, sys, time\n"
+        "child = subprocess.Popen([sys.executable, '-c',\n"
+        f"    \"import time\\nwith open(r'{heartbeat}', 'w') as f:\\n\"\n"
+        "    \"    for i in range(1000):\\n\"\n"
+        "    \"        f.write(str(i)); f.flush(); f.seek(0)\\n\"\n"
+        "    \"        time.sleep(0.1)\\n\"\n"
+        "])\n"
+        "time.sleep(100)\n"
+    )
+    start_job, check_job, _ = make_tools(skill_dir, timeout=1)
+    job_id = start_job("spawn_child.py", [])
+    time.sleep(0.3)
+    assert heartbeat.exists(), "grandchild never started"
+
+    _wait_for_result(check_job, job_id, timeout=5)
+
+    reading_after_kill = heartbeat.read_text()
+    time.sleep(0.5)
+    reading_later = heartbeat.read_text()
+    assert reading_after_kill == reading_later, "grandchild kept running after timeout"

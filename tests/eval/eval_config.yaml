@@ -1,0 +1,67 @@
+metrics_to_run:
+  - disposition_correctness
+  - mentions_expected_disposition_keyword
+
+custom_metrics:
+  # LLM-as-judge: does the agent's final response reach the right disposition
+  # and identify the right gap/finding, per this case's `reference`? This is
+  # the core thing worth testing for a compliance-checking agent — not
+  # response style, but whether the actual gap analysis is correct.
+  - name: disposition_correctness
+    prompt_template: |
+      You are grading a document compliance validator agent. Given the user's
+      request, the agent's final response, and a reference describing the
+      correct disposition and key finding, score how well the response matches.
+
+      User request: {prompt}
+      Agent's final response: {response}
+      Reference (correct disposition and key finding): {reference}
+
+      Score 1-5:
+      1 (Wrong) - disposition contradicts the reference, or the key finding
+        (e.g. which requirement is missing, or why a disqualifying condition
+        applies) is wrong or absent.
+      2 (Mostly wrong) - disposition or key finding is unclear/hedged when the
+        reference is clear-cut.
+      3 (Partially correct) - disposition matches but the key finding/reasoning
+        is incomplete or imprecise.
+      4 (Correct, minor gaps) - disposition and key finding both match the
+        reference, with only minor missing detail (e.g. exact REQ id format).
+      5 (Fully correct) - disposition and key finding both match the
+        reference precisely, with correct reasoning shown.
+
+      Return your evaluation as a valid JSON object matching this structure:
+      {
+        "score": <integer between 1 and 5>,
+        "explanation": "<detailed string explaining the rationale for the score assigned>"
+      }
+
+  # Cheap deterministic signal alongside the LLM judge: does the response even
+  # contain the expected disposition keyword at all? Catches the agent
+  # avoiding a disposition entirely (e.g. only flagging "manual review").
+  - name: mentions_expected_disposition_keyword
+    custom_function: |
+      def _extract_text(value):
+          if not value:
+              return ""
+          # Plain string, or the nested {"response": {"role": ..., "parts": [...]}} shape.
+          if isinstance(value, str):
+              return value
+          content = value.get("response", value)
+          parts = content.get("parts", []) if isinstance(content, dict) else []
+          return " ".join(p.get("text", "") for p in parts if isinstance(p, dict))
+
+      def evaluate(instance):
+          response_text = _extract_text(instance.get("response")).lower()
+          reference_text = _extract_text(instance.get("reference")).lower()
+
+          keywords = ["approve", "request correction", "return filing", "escalate"]
+          expected = [k for k in keywords if k in reference_text]
+          if not expected:
+              return {"score": 1, "explanation": "No recognized disposition keyword in reference."}
+
+          found = any(k in response_text for k in expected)
+          return {
+              "score": 1.0 if found else 0.0,
+              "explanation": f"Expected one of {expected} in response; found={found}.",
+          }

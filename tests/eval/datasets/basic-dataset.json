@@ -1,0 +1,67 @@
+{
+  "eval_cases": [
+    {
+      "eval_case_id": "fully_compliant_simple",
+      "reference": {
+        "response": {
+          "role": "model",
+          "parts": [
+            {
+              "text": "Disposition should be Approve. All three mandatory requirements (business license number, contact email, signed declaration) are present in the submission, and there are no disqualifying conditions in the regulation."
+            }
+          ]
+        }
+      },
+      "prompt": {
+        "role": "user",
+        "parts": [
+          {
+            "text": "Please validate this submission against the regulation below.\n\nRegulation:\nArticle 1. The applicant must state their business license number.\nArticle 2. The applicant must provide a contact email address.\nArticle 3. The applicant must include a signed declaration of accuracy.\n\nSubmission:\nBusiness license number: BL-2024-00451.\nContact email: ops@example.com.\nDeclaration: \"I declare the above information is accurate and complete.\" — signed, Jane Lin, 2026-06-01.\n\nThere are no other documents. Please give me the validation report directly without asking me follow-up questions."
+          }
+        ]
+      }
+    },
+    {
+      "eval_case_id": "missing_mandatory_item",
+      "reference": {
+        "response": {
+          "role": "model",
+          "parts": [
+            {
+              "text": "Disposition should be Request correction (or equivalent — not Approve). REQ corresponding to Article 2 (contact email address) is Missing — the submission never states a contact email. This is correctable by supplementation, so the deficiency type should be Correctable, not Substantive."
+            }
+          ]
+        }
+      },
+      "prompt": {
+        "role": "user",
+        "parts": [
+          {
+            "text": "Please validate this submission against the regulation below.\n\nRegulation:\nArticle 1. The applicant must state their business license number.\nArticle 2. The applicant must provide a contact email address.\nArticle 3. The applicant must include a signed declaration of accuracy.\n\nSubmission:\nBusiness license number: BL-2024-00451.\nDeclaration: \"I declare the above information is accurate and complete.\" — signed, Jane Lin, 2026-06-01.\n\nThere are no other documents. Please give me the validation report directly without asking me follow-up questions."
+          }
+        ]
+      }
+    },
+    {
+      "eval_case_id": "disqualifying_condition_triggers_return",
+      "reference": {
+        "response": {
+          "role": "model",
+          "parts": [
+            {
+              "text": "Disposition must be Return filing, regardless of how well other requirements are met. The regulation states applications submitted more than 30 days after the incident date will not be accepted, and the submission's incident date (2026-01-01) to submission date (2026-03-15) gap is well over 30 days, so this is a Disqualifying failure."
+            }
+          ]
+        }
+      },
+      "prompt": {
+        "role": "user",
+        "parts": [
+          {
+            "text": "Please validate this submission against the regulation below.\n\nRegulation:\nArticle 1. The applicant must state their business license number.\nArticle 2. Applications submitted more than 30 days after the incident date will not be accepted.\n\nSubmission:\nBusiness license number: BL-2024-00451.\nIncident date: 2026-01-01.\nSubmission date: 2026-03-15.\n\nThere are no other documents. Please give me the validation report directly without asking me follow-up questions."
+          }
+        ]
+      }
+    }
+  ]
+}

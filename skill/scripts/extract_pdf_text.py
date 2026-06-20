@@ -15,6 +15,9 @@ Per page:
     to check the original PDF for figures, photos, or scanned attachments.
   - Pages with little or no extractable content (no real text, no tables) are
     flagged as likely scanned/image-based.
+  - Pages dense with vector graphics (CAD drawings, 3D renderings) skip table
+    detection entirely and are flagged as drawings needing visual review —
+    see PDF_DRAWING_PAGE_VECTOR_THRESHOLD below.
 
 Pages within a chunk are processed in parallel across worker processes (table
 detection is the slow part of pdfplumber and is pure-Python/CPU-bound, so
@@ -27,6 +30,13 @@ of the PDF, so peak memory scales with worker count — for very large PDFs,
 more workers means more memory, not just more speed; if a chunk OOMs, reduce
 --workers
 before reducing chunk size.
+
+A single page (typically one with a large or complex embedded image) can take
+far longer than the rest of the chunk combined. $PDF_PAGE_TIMEOUT_SECONDS
+(default 30) caps how long any one page gets before it's skipped and flagged
+for manual review — without this, a single bad page would only be caught by
+the whole script's SCRIPT_TIMEOUT_SECONDS, which kills the entire chunk
+(losing every page that did finish) instead of just the one page that didn't.
 
 For large PDFs, use --start/--end to pull the document in page-range chunks
 instead of extracting the whole file at once.
@@ -41,6 +51,7 @@ Usage:
 import argparse
 import concurrent.futures
 import os
+import signal
 import sys
 import time
 
@@ -58,11 +69,70 @@ def log_progress(message):
 # silently treated as empty sections.
 SCANNED_PAGE_CONTENT_THRESHOLD = 20
 
+# A single page — typically one with a large or complex embedded image —
+# can take far longer than the rest of the document combined, and the only
+# safety net otherwise is the whole script's SCRIPT_TIMEOUT_SECONDS, which
+# kills the entire chunk (losing every page that *did* finish) and keeps
+# accumulating memory the whole time it's stuck. This caps a single page on
+# its own, so one bad page is skipped and flagged instead of taking the
+# whole chunk down with it. 0 disables this (no per-page cap).
+PAGE_TIMEOUT_SECONDS = int(os.getenv("PDF_PAGE_TIMEOUT_SECONDS", "30"))
+
+
+class _PageTimeoutError(Exception):
+    pass
+
+
+def _alarm_handler(signum, frame):
+    raise _PageTimeoutError()
+
+
+def _extract_page_markdown_with_timeout(page, page_num):
+    """Wraps extract_page_markdown with a per-page wall-clock cap.
+
+    Uses SIGALRM rather than a thread/process, since this already runs as the
+    sole work of a worker process (or the main process in sequential mode) —
+    no extra process to manage, and Python delivers the signal as soon as
+    control returns to the interpreter, which is enough to interrupt CPU-bound
+    parsing of a single oversized page without affecting any other page.
+    """
+    if PAGE_TIMEOUT_SECONDS <= 0:
+        return extract_page_markdown(page)
+
+    previous_handler = signal.signal(signal.SIGALRM, _alarm_handler)
+    signal.alarm(PAGE_TIMEOUT_SECONDS)
+    try:
+        return extract_page_markdown(page)
+    except _PageTimeoutError:
+        log_progress(
+            f"page {page_num}: timed out after {PAGE_TIMEOUT_SECONDS}s — likely a large or "
+            "complex embedded image. Skipping and flagging for manual review."
+        )
+        return (
+            "*[Page processing timed out — likely a large or complex embedded image. "
+            "Manual review needed.]*",
+            True,
+            0,
+        )
+    finally:
+        signal.alarm(0)
+        signal.signal(signal.SIGALRM, previous_handler)
+
 # pdfplumber's default table-detection strategy looks for ruling lines, which
 # matches most government forms and regulation tables. If a document uses
 # whitespace-aligned tables with no visible lines, override with
 # {"vertical_strategy": "text", "horizontal_strategy": "text"}.
 TABLE_SETTINGS = {}
+
+# find_tables()'s ruling-line detection groups every line/curve/rect on the
+# page looking for grid structure, and its cost scales with how many of those
+# objects exist — a CAD drawing or 3D architectural rendering can have
+# thousands of short vector segments (fine detail, dimension marks, hatching)
+# that aren't a table at all, and running table detection on them can take
+# minutes for a page with nothing to find. A page this dense with vector
+# graphics is treated as a drawing/diagram and skips table detection entirely
+# rather than running it and hoping it finishes in time.
+DRAWING_PAGE_VECTOR_THRESHOLD = int(os.getenv("PDF_DRAWING_PAGE_VECTOR_THRESHOLD", "800"))
 
 # One pdfplumber.PDF handle per worker process, opened once via _init_worker
 # rather than once per page — reused across every page that worker handles.
@@ -97,6 +167,19 @@ def rows_to_markdown(rows):
 
 
 def extract_page_markdown(page):
+    vector_object_count = len(page.lines) + len(page.curves) + len(page.rects)
+    if vector_object_count > DRAWING_PAGE_VECTOR_THRESHOLD:
+        text = (page.extract_text() or "").strip()
+        parts = []
+        if text:
+            parts.append(text)
+        parts.append(
+            f"*[Page appears to be a technical drawing/diagram ({vector_object_count} vector "
+            "graphic objects detected) — content not extracted. Visual review needed to confirm "
+            "what the drawing shows; do not assume it satisfies a requirement without checking.]*"
+        )
+        return "\n\n".join(parts), True, 0
+
     tables = page.find_tables(table_settings=TABLE_SETTINGS)
     table_bboxes = [t.bbox for t in tables]
 
@@ -134,7 +217,7 @@ def _process_page(page_num):
     log_progress(f"pid {os.getpid()}: starting page {page_num}")
     started = time.time()
     page = _worker_pdf.pages[page_num - 1]
-    md, likely_scanned, n_tables = extract_page_markdown(page)
+    md, likely_scanned, n_tables = _extract_page_markdown_with_timeout(page, page_num)
     log_progress(f"pid {os.getpid()}: finished page {page_num} ({time.time() - started:.1f}s)")
     return page_num, md, likely_scanned, n_tables
 
@@ -142,7 +225,7 @@ def _process_page(page_num):
 def _extract_with_log(pdf, page_num):
     log_progress(f"starting page {page_num}")
     started = time.time()
-    result = extract_page_markdown(pdf.pages[page_num - 1])
+    result = _extract_page_markdown_with_timeout(pdf.pages[page_num - 1], page_num)
     log_progress(f"finished page {page_num} ({time.time() - started:.1f}s)")
     return result
 
