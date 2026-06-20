@@ -153,3 +153,49 @@ def test_timeout_kills_grandchild_processes(skill_dir, tmp_path):
     time.sleep(0.5)
     reading_later = heartbeat.read_text()
     assert reading_after_kill == reading_later, "grandchild kept running after timeout"
+
+
+def test_old_finished_jobs_are_evicted_once_over_capacity(skill_dir):
+    import agent.tools as tools_module
+
+    original_max = tools_module.MAX_RETAINED_JOBS
+    tools_module.MAX_RETAINED_JOBS = 3
+    try:
+        (skill_dir / "scripts" / "hello.py").write_text('print("hi")')
+        start_job, check_job, _ = make_tools(skill_dir)
+
+        job_ids = []
+        for _ in range(5):
+            job_id = start_job("hello.py", [])
+            _wait_for_result(check_job, job_id)
+            job_ids.append(job_id)
+
+        # The oldest finished jobs should have been evicted once over capacity.
+        assert check_job(job_ids[0]) == f"[error] unknown job_id: {job_ids[0]}"
+        # The most recent ones should still be retrievable.
+        assert check_job(job_ids[-1]) == "hi\n"
+    finally:
+        tools_module.MAX_RETAINED_JOBS = original_max
+
+
+def test_running_job_is_never_evicted(skill_dir):
+    import agent.tools as tools_module
+
+    original_max = tools_module.MAX_RETAINED_JOBS
+    tools_module.MAX_RETAINED_JOBS = 1
+    try:
+        (skill_dir / "scripts" / "slow.py").write_text("import time; time.sleep(1)")
+        (skill_dir / "scripts" / "hello.py").write_text('print("hi")')
+        start_job, check_job, _ = make_tools(skill_dir)
+
+        slow_job_id = start_job("slow.py", [])
+        # Starting more jobs while the first is still running must not evict it.
+        for _ in range(3):
+            job_id = start_job("hello.py", [])
+            _wait_for_result(check_job, job_id)
+
+        result = check_job(slow_job_id)
+        assert not result.startswith("[error] unknown job_id"), "running job was evicted"
+        _wait_for_result(check_job, slow_job_id)
+    finally:
+        tools_module.MAX_RETAINED_JOBS = original_max

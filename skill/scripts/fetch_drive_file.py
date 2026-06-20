@@ -24,10 +24,12 @@ Usage:
 import argparse
 import re
 import sys
+import time
 
 from google.auth import default as google_auth_default
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
+from googleapiclient.http import MediaIoBaseDownload
 
 DRIVE_URL_PATTERNS = [
     r"/file/d/([a-zA-Z0-9_-]+)",
@@ -85,8 +87,23 @@ def download_file(service, file_id, mime_type, out_path):
     else:
         request = service.files().get_media(fileId=file_id)
 
+    # MediaIoBaseDownload streams in chunks and writes each one as it arrives,
+    # rather than request.execute() buffering the entire file in memory before
+    # any of it reaches disk — for a 100+MB file that's a needless memory
+    # spike on top of whatever else is running in the container. The logged
+    # progress also gives something to report while this runs as a start_job
+    # job — a multi-minute download otherwise has nothing to show until done.
+    last_logged_percent = -1
     with open(out_path, "wb") as f:
-        f.write(request.execute())
+        downloader = MediaIoBaseDownload(f, request)
+        done = False
+        while not done:
+            status, done = downloader.next_chunk()
+            if status:
+                percent = int(status.progress() * 100)
+                if percent >= last_logged_percent + 10:
+                    print(f"[{time.strftime('%H:%M:%S')}] download progress: {percent}%", file=sys.stderr, flush=True)
+                    last_logged_percent = percent
 
 
 def main():

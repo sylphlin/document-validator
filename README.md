@@ -63,7 +63,7 @@ Coverage scores:
 | 0–39% | 🚫 Missing | No corresponding content found |
 
 ### Phase 3 — Report Generation
-The agent produces a structured report in the language of the input documents, containing:
+The agent produces a structured report in the language the user is communicating in (not necessarily the language of the input documents being analyzed), containing:
 
 - **Executive summary** — overall compliance rate and disposition recommendation
 - **Detailed results table** — one row per requirement, with score, source reference, and notes

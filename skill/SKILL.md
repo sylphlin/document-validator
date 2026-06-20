@@ -38,6 +38,25 @@ Documents can be provided either as direct uploads or as Google Drive links (use
 when a file is too large to paste into chat) — see §0.1 for how Drive links are
 fetched and processed.
 
+## Response Language
+
+Respond in the language the user is writing in — every reply in this skill,
+conversational narration and the final report alike, not just the report. Do not
+switch to the language of the input documents being analyzed; the documents are
+the subject matter, not the language to respond in.
+
+For Chinese specifically, Traditional and Simplified are different target outputs,
+not interchangeable — match whichever script the user is actually typing in
+(Traditional 繁體 vs Simplified 简体), and keep it consistent for the rest of the
+conversation once established. If the user explicitly asks for a different
+language or script than what they're typing in, honor that instead. If the
+user's language/script cannot be determined from what they've written so far,
+default to Traditional Chinese (zh-TW) rather than guessing toward whichever
+variant is statistically more common in general.
+
+System tracking symbols (REQ-{ID}, Doc-R{N}, Doc-S{N}) are never translated or
+transliterated, regardless of response language — see Phase 3 for the full list.
+
 **A note on running scripts:** every command shown in this document as
 `python3 scripts/{name}.py ...` refers to one of exactly two scripts that exist in
 this skill: `extract_pdf_text.py` and `fetch_drive_file.py`. There is no third
@@ -377,16 +396,22 @@ structure (a flat list of articles with no sub-items), plain sequential IDs
 
 ### 1.2 Build the Compliance Profile
 
-Represent each requirement as a structured record:
+Represent the requirements as a Markdown table, one row per requirement:
 
-```
-REQ-{hierarchical ID, e.g. 1, 1.2, or 1.2.3}
-Type:         Disqualifying / Mandatory / Conditional / Advisory
-Source:       [Doc-R{N}] {original document label, e.g. "Article 2, Item 3" or page reference}
-Requirement:  {One-sentence description of what is required}
-Check method: Field presence / Keyword match / Numeric or format check / Logic consistency
-Trigger:      {For Conditional only — state the condition; leave blank otherwise}
-```
+| ID | Type | Source | Requirement | Check method | Trigger |
+|----|------|--------|-------------|---------------|---------|
+| REQ-1.2.3 | Mandatory | [Doc-R1] Article 2, Item 3 | {one-sentence description of what is required} | Field presence | — |
+| REQ-3.1 | Conditional | [Doc-R1] Article 4 | {one-sentence description of what is required} | Logic consistency | {the condition that triggers this requirement} |
+
+- **ID** — the hierarchical REQ-{ID} from §1.1.
+- **Type** — Disqualifying / Mandatory / Conditional / Advisory.
+- **Source** — [Doc-R{N}] plus the original document label (e.g. "Article 2, Item 3" or a page reference).
+- **Check method** — Field presence / Keyword match / Numeric or format check / Logic consistency.
+- **Trigger** — for Conditional rows only, state the condition; leave as `—` for every other type.
+
+For a long table, build it the same incrementally-across-chunks way as the rest
+of Phase 1 — append rows as each chunk is parsed rather than holding the whole
+table until the end.
 
 ### 1.3 Checkpoint — Confirm Compliance Profile
 
@@ -497,9 +522,11 @@ Flag for manual review when:
 
 ## Phase 3: Report Generation
 
-The report language follows the language of the input documents. All descriptive text,
-notes, and suggestions are written in that language. The following identifiers are
-system tracking symbols and are never translated: REQ-{ID} (e.g. REQ-1.2), Doc-R1/Doc-R2/Doc-R3, Doc-S1/Doc-S2/Doc-S3.
+The report follows the same response-language rule as the rest of this skill (see
+"Response Language" above) — it does not switch to the input documents' language
+just because that's what's being analyzed. The following identifiers are system
+tracking symbols and are never translated regardless of language: REQ-{ID} (e.g.
+REQ-1.2), Doc-R1/Doc-R2/Doc-R3, Doc-S1/Doc-S2/Doc-S3.
 
 **Produce the report section by section, narrating as you go** (see "Calling
 Scripts" above — this applies to your own generation, not just script jobs). For a

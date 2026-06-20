@@ -1,4 +1,5 @@
 # agent/tools.py
+import collections
 import os
 import signal
 import subprocess
@@ -6,6 +7,13 @@ import sys
 import threading
 import uuid
 from pathlib import Path
+
+# A single container instance serves many conversations over its lifetime, not
+# one container per conversation — every finished job's full stdout (e.g. an
+# entire extracted PDF chunk's Markdown) would otherwise stay resident in
+# memory forever. This caps how many finished jobs are kept at once; a job
+# still "running" is never evicted regardless of how many others pile up.
+MAX_RETAINED_JOBS = 50
 
 
 def _available_scripts(scripts_dir: Path) -> list[str]:
@@ -27,8 +35,18 @@ def make_tools(skill_dir: Path, timeout: int = 60):
     have finished fine given more time.
     """
     scripts_dir = skill_dir / "scripts"
-    jobs: dict[str, dict] = {}
+    jobs: "collections.OrderedDict[str, dict]" = collections.OrderedDict()
     jobs_lock = threading.Lock()
+
+    def _evict_old_jobs_locked():
+        """Caller must hold jobs_lock. Evicts oldest *finished* jobs only."""
+        if len(jobs) <= MAX_RETAINED_JOBS:
+            return
+        for jid in list(jobs.keys()):
+            if len(jobs) <= MAX_RETAINED_JOBS:
+                break
+            if jobs[jid]["status"] != "running":
+                del jobs[jid]
 
     def _run_job(job_id: str, script_path: Path, args: list[str]):
         # Use Popen directly (not subprocess.run) so a timeout can kill the
@@ -93,6 +111,7 @@ def make_tools(skill_dir: Path, timeout: int = 60):
         job_id = uuid.uuid4().hex[:12]
         with jobs_lock:
             jobs[job_id] = {"status": "running"}
+            _evict_old_jobs_locked()
         threading.Thread(target=_run_job, args=(job_id, script_path, list(args)), daemon=True).start()
         return job_id
 
