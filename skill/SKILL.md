@@ -2,131 +2,94 @@
 name: document-validator
 description: >
   Use this skill when a user needs to validate whether a pending document meets
-  a given set of standards or requirements. Triggers when the user provides a
-  criteria document (regulation, tender spec, review-committee comments, etc.) AND a
-  pending document to check against it. Also trigger when the user says "validate
-  this document", "check compliance", "review this application", "does this meet the
-  requirements", or anything involving checking a document against rules or criteria —
-  not necessarily a government regulation. Use this skill whenever both criteria and a
-  document to check are present in context, even if the request is phrased casually.
+  given criteria. Triggers when the user provides a criteria document (regulation,
+  tender spec, review-committee comments, etc.) AND a pending document to check
+  against it. Also trigger on "validate this document", "check compliance",
+  "review this application", "does this meet the requirements", or anything
+  involving checking a document against rules or criteria — not necessarily a
+  government regulation. Use whenever both criteria and a document to check are
+  present in context, even if phrased casually.
 ---
 
 # Document Validator Skill
 
 ## Overview
 
-Validates a pending document against provided criteria. The criteria don't
-have to be a government regulation — they can be any document that defines what's
-required: a tender specification, a review committee's comments, an internal
-checklist, etc. Produces a structured audit report with confidence-scored gap
-analysis — every requirement gets a coverage score, every gap gets an explanation
-and a correction suggestion. The output is an actionable, defensible audit trail,
-not just a verdict.
+Validates a pending document against provided criteria — which can be any
+document that defines what's required (regulation, tender spec, review-committee
+comments, internal checklist), not just a government regulation. Produces a
+structured audit report with confidence-scored gap analysis: every requirement
+gets a coverage score, every gap gets an explanation and a correction suggestion.
+The output is an actionable, defensible audit trail, not just a verdict.
 
 ---
 
 ## Inputs Required
 
-**Criteria Documents** — one or more documents that together define what the pending documents must
-satisfy. Any format is accepted: regulations, article lists, checklists, policy text,
-tender specifications, review-committee comments, etc.
+**Criteria Documents** — one or more documents that together define what the
+pending documents must satisfy. Any format: regulations, article lists,
+checklists, policy text, tender specs, review-committee comments, etc.
 
-**Pending Documents** — one or more documents that together form what's being checked against
-the criteria. Typically includes a main document (an application, a bid, a project plan)
-plus attachments such as technical reports, consent letters, or assessment results.
+**Pending Documents** — one or more documents being checked against the
+criteria. Typically a main document (application, bid, project plan) plus
+attachments (technical reports, consent letters, assessment results).
 
-At least one document on each side is required. If either side is missing, ask the user
-to provide it before proceeding.
-
-Documents can be provided either as direct uploads or as Google Drive links (useful
-when a file is too large to paste into chat) — see §0.1 for how Drive links are
-fetched and processed.
+At least one document on each side is required; ask the user for whichever is
+missing before proceeding. Documents can be direct uploads or Google Drive links
+(see §0.1) — useful when a file is too large to paste into chat.
 
 ## Response Language
 
-Respond in the language the user is writing in — every reply in this skill,
-conversational narration and the final report alike, not just the report. Do not
-switch to the language of the input documents being analyzed; the documents are
-the subject matter, not the language to respond in.
+Respond in the language the user is writing in — narration and the final report
+alike. Do not switch to the language of the documents being analyzed; they're the
+subject matter, not the response language.
 
-For Chinese specifically, Traditional and Simplified are different target outputs,
-not interchangeable — match whichever script the user is actually typing in
-(Traditional vs Simplified), and keep it consistent for the rest of the
-conversation once established. If the user explicitly asks for a different
-language or script than what they're typing in, honor that instead. If the
-user's language/script cannot be determined from what they've written so far,
-default to Traditional Chinese (zh-TW) rather than guessing toward whichever
-variant is statistically more common in general.
+For Chinese specifically, Traditional and Simplified are different target
+outputs, not interchangeable — match whichever script the user is typing in and
+keep it consistent once established. Honor an explicit request for a different
+language/script. If undetermined, default to Traditional Chinese (zh-TW) rather
+than guessing toward whichever variant is more common in general.
 
 System tracking symbols (REQ-{ID}, C-{N}, P-{N}) are never translated or
-transliterated, regardless of response language — see Phase 3 for the full list.
-
-**A note on running scripts:** every command shown in this document as
-`python3 scripts/{name}.py ...` refers to one of exactly two scripts that exist in
-this skill: `extract_pdf_text.py` and `fetch_drive_file.py`. There is no third
-script for any other step — if a task in this document doesn't name one of these
-two files, it's meant to be done by reasoning directly, not by calling a script.
-Whatever tool actually executes these (a shell, or a `start_job`-style tool) takes
-the bare filename — drop the `scripts/` prefix and the `python3` prefix shown in the
-examples; they're there to make the command copyable, not to be passed literally.
+transliterated, regardless of response language.
 
 ---
 
-## Calling Scripts: Launch, Poll, and Narrate
+## Running Scripts
 
-Every script call in this document goes through two tools instead of one blocking
-call: **`start_job`** launches a script in the background and returns a `job_id`
-immediately; **`check_job`** polls that `job_id` for its status. Neither tool
-blocks waiting for the script to finish. This matters because the chat surface
-this skill runs behind may apply its own timeout to a single conversational turn
-that has nothing to do with how long a script legitimately needs — extracting a
-140-page criteria document, or downloading a 111MB pending document from Drive, can easily
-take longer than that turn-level timeout even though the script itself is working
-correctly. Launching it in the background and polling decouples the two.
+This skill bundles exactly two scripts: `extract_pdf_text.py` and
+`fetch_drive_file.py`. If a step below doesn't name one of these, do it by
+reasoning directly — there is no script for it. Commands are shown as
+`python3 scripts/{name}.py ...`; whatever tool actually runs them takes the bare
+filename, not the `scripts/` or `python3` prefix shown.
 
-**The pattern for every script call:**
-1. `start_job` with the script name and its arguments → get back a `job_id`.
-2. `check_job` with that `job_id`. This call itself waits a few seconds before
-   returning if the job hasn't finished yet — don't call it again immediately
-   after getting `[status] running` back; that wait is already real elapsed
-   time, not wasted time. For a job you expect to take a while, pass a larger
-   `wait_seconds` (up to the max) instead of polling rapidly.
-   - `[status] running` → see "Narrate progress, not every poll" below.
-   - the script's actual output → the job is done, move on.
-   - `[error] ...` → handle it per that script's own error guidance (e.g. §0.4's
-     notes on timeout errors).
-3. While one job is running, you can `start_job` additional independent work
-   instead of waiting idle — e.g. the next chunk, or a second document's
-   extraction. They run concurrently in the background.
+Every script call goes through two tools instead of one blocking call:
+**`start_job`** launches it in the background and returns a `job_id`;
+**`check_job`** polls that `job_id`. This decouples a script's real duration from
+the chat surface's own per-turn timeout, which is unrelated to — and often
+shorter than — how long a script may legitimately need.
 
-**Narrate progress, not every poll.** A background job is invisible to the user
-unless you say something — silence for a long stretch reads as "stuck." But
-narrating *every single* `check_job` call produces a wall of repetitive "still
-waiting" messages that's worse than silence — it buries the one update that
-actually matters. Say something when you start a job, and again roughly once
-every 30–60 seconds of real elapsed waiting (a handful of `check_job` calls,
-not one), or whenever the situation actually changes (e.g. you now know why it's
-slow, or you've decided to adjust your approach) — not on every individual
-`[status] running` response. This applies just as much when the long-running
-thing is your own reasoning rather than a script — e.g. scoring dozens of
-requirements in Phase 2 has no job to poll, but narrate progress at natural
-checkpoints anyway (e.g. "Scored requirements 1–10 of 42...") rather than after
-every single one.
+**Pattern:**
+1. `start_job(script, args)` → `job_id`.
+2. `check_job(job_id, wait_seconds)` — already waits internally (default 5s, up
+   to 15s) before returning, so don't re-call it the instant you see
+   `[status] running`. Pass a larger `wait_seconds` for jobs expected to take a
+   while, instead of polling rapidly.
+3. While one job runs, `start_job` other genuinely independent work (a different
+   document, the next file from Drive) instead of waiting idle.
 
-**Never mention internal tool or script names, file paths, or your own
-troubleshooting process in what you say to the user.** "Still downloading the
-file from Drive..." is fine; "checking fetch_drive_file.py's
-parameters to find the best way to read this" or "trying /dev/stdout" is not —
-the user doesn't need or want to know which script, which flag, or what you tried
-that didn't work. Describe what's happening in plain, functional terms: what
-document, what step, roughly how far along. Save implementation-level detail for
-when something has genuinely failed and a human needs to intervene.
+**Narrate, but not every poll.** Say something when a job starts, then again
+roughly every 30–60 seconds of real waiting — not on every single
+`[status] running`. Same for your own reasoning when there's no job to poll (e.g.
+scoring in Phase 2): narrate at natural checkpoints, not after every item.
 
-**End the turn only if something is genuinely still running**, not as a default
-habit after every chunk. If everything you started finishes within the same turn,
-keep going — start the next chunk, keep narrating, and only stop when the phase is
-actually done or something is still in flight. When you do need to end a turn
-early, say plainly what's still running and that you'll continue automatically.
+**Never expose script/tool names or your own troubleshooting to the user.**
+Describe progress in plain terms — what document, what step, how far along — not
+which file or flag you used.
+
+**Only end a turn if something is genuinely still running.** Keep going chunk
+after chunk in the same turn as long as each one finishes; when you do need to
+stop early, say plainly what's still in flight.
 
 ---
 
@@ -138,7 +101,6 @@ Phase 0: Intake
 Phase 1: Criteria Checklist Extraction   ← parse criteria → build requirement list
       ↓  [checkpoint: user confirms]
 Phase 2: Document Matching & Scoring     ← scan pending documents → score each requirement
-                                            (includes logic & consistency check)
       ↓
 Phase 3: Report Generation               ← single standard report
 ```
@@ -149,77 +111,67 @@ Phase 3: Report Generation               ← single standard report
 
 ### 0.0 Back Up Directly-Uploaded Files
 
-This skill may run in a deployed agent whose container instance can be swapped out
-between turns — anything written only to local disk can disappear from one turn to
-the next. A file fetched via a Google Drive link (§0.1) doesn't need backing up,
-since it can always be re-fetched from Drive again. A file the user **pasted or
-uploaded directly into the conversation** has no such fallback, so as soon as it's
-saved to local disk, back it up once with:
+This skill may run in a deployed agent whose container instance can be swapped
+between turns — anything on local disk only can disappear. A file fetched via a
+Drive link (§0.1) doesn't need backing up, since it can be re-fetched. A file the
+user **pasted or uploaded directly** has no such fallback — back it up once it's
+on local disk:
 
 ```
 python3 scripts/gcs_state.py upload-file --session-id {session-id} --user-id {user-id} --file /tmp/{doc-id}.pdf
 ```
 
-`{session-id}` and `{user-id}` are given to you at the start of this conversation —
-use them as-is. If they were not provided (e.g. running as a Claude Code skill
-rather than a deployed Agent Engine agent), skip this step entirely; there is no
-container-swap risk to guard against in that environment. If a file ever goes
-missing locally later in the same conversation, restore it with `download-file`
-instead of asking the user to re-upload.
+`{session-id}`/`{user-id}` are given to you at conversation start; use them
+as-is, or skip this step entirely if not provided (e.g. running as a Claude Code
+skill, where there's no container-swap risk). If a file goes missing later in the
+conversation, restore it with `download-file` instead of asking the user to
+re-upload.
 
 ### 0.1 Accepting Documents via Google Drive Link
 
-Large files often cannot be pasted directly into chat, so a Google Drive link is an
-expected input — e.g. "Here is the pending document: https://drive.google.com/file/d/abc123/view".
-When a message contains a `drive.google.com` or `docs.google.com` URL, treat it as a
-document the same way an uploaded file would be treated, fetched via
+A Drive link is an expected input for large files (e.g. "Here is the pending
+document: https://drive.google.com/file/d/abc123/view"). Treat any
+`drive.google.com`/`docs.google.com` URL as a document, fetched via
 `scripts/fetch_drive_file.py`.
 
-This script calls the Google Drive API directly (not a chat-client connector or MCP
-tool), since this skill may run in environments — such as an ADK agent deployed on
-Google Agent Engine — where no such connector exists. It authenticates with
-Application Default Credentials (ADC): whatever service account or user credential
-is configured in the runtime environment. **The target file must be shared with that
-identity** — for a service account, that means sharing the file with the service
-account's email address specifically, not just "anyone with the link."
+This script calls the Drive API directly (not a chat-client connector), since
+this skill may run where no such connector exists. It authenticates via
+Application Default Credentials — **the target file must be shared with that
+identity** (for a service account, its email address specifically, not "anyone
+with the link").
 
-**1. Check what the link points to** (via `start_job`/`check_job` — see "Calling
-Scripts" above):
+**1. Check what the link points to:**
 
 ```
 python3 scripts/fetch_drive_file.py "{drive-url}"
 ```
 
-With no `--out`, this just prints the file's name, MIME type, and size — enough to
-confirm the link resolves and decide how to handle it next, and to see the file
-size before committing to a download. If this fails (file not found, no access),
-tell the user plainly: "I can't access this Drive link — please confirm the file
-exists and is shared with the service account this agent runs as, then send the
-link again." Do not guess at the document's content from the URL or filename alone.
+With no `--out`, this just prints name/MIME type/size — enough to confirm access
+and size before downloading. On failure, tell the user plainly: "I can't access
+this Drive link — please confirm it's shared with the service account this agent
+runs as." Do not guess content from the URL or filename.
 
-**2. Fetch the content, normalizing everything to the same pipeline used for uploaded files.**
-A large file (e.g. a 111MB document) can take a while to download — start the job,
-then poll and narrate per the "Calling Scripts" pattern (e.g. "Still downloading
-{name} (111MB) from Drive..." on each check that comes back running):
+**2. Fetch the content**, normalizing to the same pipeline used for uploads.
+Start the job, then poll and narrate per "Running Scripts" above:
 
 | Target | Command | Then |
 |--------|---------|------|
-| PDF file | `python3 scripts/fetch_drive_file.py "{url}" --out /tmp/{doc-id}.pdf` | Run the saved file through §0.4 (PDF extraction) exactly as an uploaded PDF |
-| Google-native doc (Docs/Sheets/Slides) | Same command — the script auto-exports these to PDF | Run through §0.4 — exporting to PDF first keeps page-citation conventions consistent across every document regardless of original source |
-| Plain-text/Markdown file (not a PDF, not Google-native) | `python3 scripts/fetch_drive_file.py "{url}" --print-content` | Reads the content directly into context — no separate save/extract step needed |
-| Folder link | `python3 scripts/fetch_drive_file.py "{url}" --list-only` | Lists every file inside with its own ID; repeat steps 1–2 for each one as its own inventory entry (criteria documents or pending documents, per what the user said the folder contains) |
+| PDF file | `python3 scripts/fetch_drive_file.py "{url}" --out /tmp/{doc-id}.pdf` | Run through §0.4 like an uploaded PDF |
+| Google-native doc (Docs/Sheets/Slides) | Same command — auto-exports to PDF | Run through §0.4 — exporting to PDF first keeps page-citation conventions consistent regardless of source |
+| Plain-text/Markdown file | `python3 scripts/fetch_drive_file.py "{url}" --print-content` | Reads content directly into context — no save/extract step needed |
+| Folder link | `python3 scripts/fetch_drive_file.py "{url}" --list-only` | Lists every file with its own ID; repeat steps 1–2 for each as its own inventory entry |
 
-For any other format that can't be exported to PDF and isn't plain text either,
-download it with `--out` and note in the inventory that page-level citation may
-not be available for that document; cite by section/heading instead.
+**3. Other formats** (can't export to PDF, isn't plain text): download with
+`--out` and note in the inventory that page-level citation may not be available;
+cite by section/heading instead.
 
-**4. Record provenance in the document inventory** — note that the document came from
-a Drive link rather than a direct upload, so the source is traceable if anyone needs
-to re-verify against the original later (e.g. `[P-2] financial_statement.pdf — fetched from Google Drive`).
+**4. Record provenance** in the document inventory — note the document came from
+a Drive link, so it's traceable later (e.g. `[P-2] financial_statement.pdf —
+fetched from Google Drive`).
 
 ### 0.2 Build the Document Inventory
 
-Ask the user to identify all documents on each side and their role:
+Ask the user to identify all documents and their role:
 
 ```
 Please list all documents you are providing:
@@ -248,146 +200,100 @@ Pending Documents:
   [P-3] {name} — {role}
 ```
 
-Assign short document IDs (C-1, C-2 for the criteria documents; P-1, P-2, P-3
-for the pending documents) for traceability throughout the report.
+These short IDs (C-1, C-2... / P-1, P-2, P-3...) carry traceability through the
+rest of the report.
 
 ### 0.3 Check for Unstructured Documents
 
-If any criteria document is unstructured (not a clean checklist or article list),
+If a criteria document is unstructured (not a clean checklist or article list),
 announce: "The criteria document is unstructured. I will parse it to extract all
 reviewable requirements before starting the validation."
 
 ### 0.4 Extracting Text from PDF Documents
 
-For PDF documents, use `scripts/extract_pdf_text.py` rather than relying on ad-hoc
-reading. It converts each page to Markdown rather than plain text or JSON — Markdown
-keeps page boundaries intact (needed for citations like "[P-1] p.4"), renders
-tables as real Markdown tables instead of jumbled text, and stays token-efficient
-compared to a JSON structure. Pages with little or no extractable content are
-flagged as likely scanned/image-based, and detected images are noted (their content
-is not extracted) so a reviewer knows to check the original PDF for figures or photos.
+Use `scripts/extract_pdf_text.py` rather than ad-hoc reading. It converts each
+page to Markdown — preserving page numbers for citation (e.g. "[P-1] p.4"),
+rendering tables as real Markdown tables, and flagging pages with little or no
+extractable content as likely scanned. Images are noted, not extracted.
 
-First, run a quick scan to see the document's size, table count, and whether any
-pages need OCR or manual review:
+First, scan the document:
 
 ```
 python3 scripts/extract_pdf_text.py {file}.pdf --summary-only
 ```
 
-Pages within a chunk are extracted in parallel across worker processes by default
-(table detection is the slow, CPU-bound part of this script). The worker count comes
-from the deployment's `PDF_EXTRACT_WORKERS` setting (see `.env.example`); pass
-`--workers N` to override it for a specific call, or `--workers 1` to force
-sequential processing if a chunk runs out of memory — each worker holds its own copy
-of the PDF in memory, so more workers means more memory used, not just more speed.
+This reports page count, table count, and which pages need OCR or manual
+review — narrate it via `start_job`/`check_job`.
 
-Use `start_job`/`check_job` for this call (see "Calling Scripts" above) and narrate
-each check (e.g. "Scanning {file}.pdf (42 pages)...", then "Still scanning..." on
-any check that comes back running).
-
-Then extract the content in chunks using `--start`/`--end`:
+Then extract in chunks of roughly **20 pages**, not 50:
 
 ```
 python3 scripts/extract_pdf_text.py {file}.pdf --start 1 --end 20 --out /tmp/{doc-id}-p1-20.md
-python3 scripts/extract_pdf_text.py {file}.pdf --start 21 --end 40 --out /tmp/{doc-id}-p21-40.md
 ```
 
-Keep chunks to roughly **20 pages**, not 50 — this isn't just about staying readable,
-it's also about the script's execution timeout (`SCRIPT_TIMEOUT_SECONDS`, configured
-per deployment — see `.env.example`): a chunk that runs long enough to approach that
-limit fails outright with no partial output, which is worse than a slow response. A
-smaller chunk finishes well under the timeout. If a single chunk still times out
-(dense tables, very large pages), halve the range and retry rather than silently
-giving up on those pages.
+20 pages keeps a chunk safely under the script's execution timeout
+(`SCRIPT_TIMEOUT_SECONDS`) — a chunk that runs long enough to approach it fails
+outright with no partial output. If a chunk still times out, halve the range and
+retry. The timeout error includes a partial stdout/stderr log of which page each
+worker reached — if the same page keeps stalling, flag it for manual review
+instead of retrying again.
 
-If a timeout error comes back, look for a "partial stdout/stderr before timeout"
-section in it — the script logs which page each worker started and finished, with
-timing, so the last line logged before the cutoff usually points straight at the
-page that was slow or stuck. Don't just retry blindly; mention the specific page if
-the same one keeps timing out, since that's a sign the page itself needs manual
-review rather than a smaller chunk.
+A single slow page (large/complex image) is capped individually by
+`PDF_PAGE_TIMEOUT_SECONDS` (default 30s) and marked
+`*[Page processing timed out...]*` rather than stalling the whole chunk. Pages
+dense with vector graphics (CAD/3D drawings) are detected even faster and marked
+`*[Page appears to be a technical drawing...]*`. **Trust either flag
+immediately — don't re-extract or single-page-probe to verify**, the result
+won't change. If an earlier chunk's table of contents shows where a drawings
+section ends and text resumes, jump straight there instead of probing page by
+page to find the boundary.
 
-A single page — usually one with a large or complex embedded image — can also
-get individually capped: if a page takes longer than `PDF_PAGE_TIMEOUT_SECONDS`
-(default 30s, see `.env.example`), the script skips just that page and marks it
-"*[Page processing timed out...]*" instead of letting it stall the whole chunk.
-Dense technical drawings (CAD, 3D renderings) are detected even faster and
-flagged as "*[Page appears to be a technical drawing/diagram...]*" without
-spending the full timeout on them at all. Treat pages flagged either way the
-same as scanned/image-based pages — they need manual review. **Trust the flag
-immediately; don't re-extract or single-page-probe the same page hoping for a
-different result** — the result won't change, and probing page by page to find
-where drawings end and text resumes wastes calls that a table of contents (if
-the document has one) already answers directly. If an early chunk's content
-included a table of contents, use the section/page numbers it gives you to jump
-straight to the next text-heavy section instead of guessing — e.g. if the TOC
-shows a "Drawings" chapter spanning pages 7–25 followed by a "Regulatory Review"
-chapter starting at page 26, extract pages 26+ next, not a string of single-page
-probes at 20, 25, 30, 35... to find that boundary by trial and error.
+Pages are extracted in parallel by default (`PDF_EXTRACT_WORKERS`, see
+`.env.example`); each worker holds its own copy of the PDF, so more workers also
+means more memory — use `--workers 1` if a chunk runs out of memory. **Don't run
+two chunks of the same file concurrently** — each already uses up to
+`PDF_EXTRACT_WORKERS` processes, so two at once doubles the memory risk. (The
+"start independent work while a job runs" rule above means a *different*
+document, not more chunks of this one.)
 
-Launch each chunk via `start_job` and narrate per the "Calling Scripts" pattern.
-**Don't start the next chunk of the same file until the current one finishes** —
-each chunk already uses up to `PDF_EXTRACT_WORKERS` worker processes internally,
-so running two chunks of the same large PDF at once multiplies memory use and
-risks the same out-of-memory failure the worker pool's fallback exists to recover
-from. The "start something else while a job runs" concurrency from "Calling
-Scripts" is for genuinely independent work instead — e.g. extracting a different
-document, or fetching the next file from Drive — not more chunks of the same file.
-Stay in the same turn and keep going chunk after chunk as long as each one keeps
-finishing; only end the turn if a chunk is still running after you've given the
-user a few status updates on it, stating which chunk it is and that you'll
-continue automatically.
+Stay in the same turn across chunks as long as each one finishes; only end early
+if a chunk is genuinely still running after a few status updates.
 
-If `--summary-only` reports scanned/image-based pages, follow the "Criteria document
-is image-based or scanned" guidance in Execution Guidelines below for those pages —
-do not silently treat them as blank. If a page's table is not detected (e.g. a table
-with no ruling lines), note this and fall back to manual transcription from the
-extracted text for that page.
+If `--summary-only` flags scanned/image-based pages, follow "Criteria document is
+image-based or scanned" in Execution Guidelines below.
 
 ---
 
 ## Phase 1: Criteria Checklist Extraction
 
-**Goal:** Parse the criteria document(s) and produce a structured requirement
-list called the Criteria Checklist.
+**Goal:** Parse the criteria document(s) into a structured requirement list, the
+Criteria Checklist.
 
-**If the criteria document(s) were extracted in multiple page-range chunks (§0.4), build the
-Criteria Checklist incrementally, one chunk at a time** — narrate progress as you
-go (e.g. "Extracted 14 requirements from pages 1-20. Continuing with pages
-21-40.") the same way as §0.4. Reasoning through every requirement in a large
-criteria document can take a while even with nothing technically blocking you, so keep
-narrating at each chunk boundary so the user can see it's moving — stay in the same
-turn across chunks as long as you're making steady progress, and only end the turn
-early if you genuinely need more time than is reasonable for one turn. Only present
-the full §1.3 checkpoint once every chunk has been processed and the running list
-is complete.
+If the criteria were extracted in multiple chunks (§0.4), build the checklist
+incrementally — narrate progress at each chunk boundary, stay in the same turn as
+long as you're making progress, and present the full §1.3 checkpoint only once
+every chunk is processed.
 
-**When chunking, checkpoint the running Criteria Checklist to GCS after each chunk**
-— it's derived from your own reasoning, not raw document content, so there's no
-cheap way to reconstruct it if the conversation is interrupted long enough for the
-session to expire or land on a different container later. After updating the
-running list, save it (the full structured list built so far, plus which page
-ranges are done and which remain):
+**Checkpoint to GCS after each chunk** — the checklist is derived from your own
+reasoning, not raw document content, so it can't be cheaply reconstructed if the
+session is interrupted long enough to expire or land on a different container:
 
 ```
 echo '{"requirements": [...], "completed_ranges": ["1-20"], "remaining_ranges": ["21-40"]}' | python3 scripts/gcs_state.py write-state --session-id {session-id} --user-id {user-id} --name criteria_checklist
 ```
 
-At the very start of Phase 1, before parsing anything, check whether a checkpoint
-already exists for this document:
+At the start of Phase 1, check for an existing checkpoint first:
 
 ```
 python3 scripts/gcs_state.py read-state --session-id {session-id} --user-id {user-id} --name criteria_checklist
 ```
 
-If one is found, resume from the `remaining_ranges` it lists instead of re-parsing
-from page 1. If none is found (the normal case for a fresh validation), proceed as
-described above. Skip both of these calls entirely if `{session-id}`/`{user-id}`
-were not provided — same as §0.0.
+If found, resume from `remaining_ranges` instead of re-parsing from page 1. Skip
+both calls if `{session-id}`/`{user-id}` were not provided (same as §0.0).
 
 ### 1.1 Parse the Criteria Documents
 
-Regardless of format, extract and classify every requirement:
+Extract and classify every requirement, regardless of format:
 
 | Type | Definition | Notes |
 |------|-----------|-------|
@@ -396,35 +302,31 @@ Regardless of format, extract and classify every requirement:
 | **Conditional** | Required only when a trigger condition applies | Score only if trigger applies |
 | **Advisory** | Recommended but not required | Note but do not mark as deficient |
 
-When parsing the criteria document, actively scan for explicit disqualifying language
-such as "will not be accepted", "shall be rejected", "application is void if",
-or equivalent phrasing in any language. Classify those requirements as Disqualifying.
-
-If no disqualifying conditions are found in the criteria, note this in the
-Criteria Checklist summary and apply the default disposition rules in Phase 3.
+Actively scan for explicit disqualifying language ("will not be accepted",
+"shall be rejected", "application is void if", or equivalent in any language) and
+classify those as Disqualifying. If none are found, note this in the checklist
+summary and apply the default disposition rules in Phase 3.
 
 Also extract:
 - **Format / length limits** — page count, required attachments, referenced forms
 - **Required terminology** — specific terms the pending documents must use or reference
 
-When the criteria have a multi-level structure (e.g. chapter → article → paragraph,
-or chapter → article → clause/item, regardless of the labeling convention used in
-the original language), the requirement ID itself should mirror that structure
-using dot notation, rather than a flat sequential counter:
+When the criteria have a multi-level structure (chapter → article → paragraph,
+or similar regardless of original labeling), mirror that structure in the
+requirement ID via dot notation rather than a flat counter:
 
 ```
 Top-level item (e.g. Chapter 1, or Article 1 in a flat set of criteria) → REQ-1
-Sub-item nested under it (e.g. Article 2 of Chapter 1)             → REQ-1.2
-Sub-sub-item nested under that (e.g. Item 3 of that Article)       → REQ-1.2.3
+Sub-item nested under it (e.g. Article 2 of Chapter 1)                  → REQ-1.2
+Sub-sub-item nested under that (e.g. Item 3 of that Article)            → REQ-1.2.3
 ```
 
-This makes the ID itself traceable to its place in the criteria — anyone reading
-"REQ-1.2.3" immediately knows it's the 3rd item under the 2nd article of chapter 1,
-without needing to separately look up a section reference. Use this numbering
-consistently everywhere a requirement is identified (Criteria Checklist, Detailed
-Results, Gap Details, Manual Review queue). If the criteria have only one level of
-structure (a flat list of articles with no sub-items), plain sequential IDs
-(`REQ-1`, `REQ-2`, `REQ-3`...) are sufficient — don't invent nesting that isn't there.
+This makes the ID itself traceable to its place in the criteria — "REQ-1.2.3" is
+immediately the 3rd item under the 2nd article of chapter 1, no separate lookup
+needed. Use this numbering consistently everywhere a requirement appears
+(Criteria Checklist, Detailed Results, Gap Details, Manual Review queue). If the
+criteria have only one level of structure, plain sequential IDs (`REQ-1`,
+`REQ-2`...) are sufficient — don't invent nesting that isn't there.
 
 ### 1.2 Build the Criteria Checklist
 
@@ -432,18 +334,17 @@ Represent the requirements as a Markdown table, one row per requirement:
 
 | ID | Type | Source | Requirement | Check method | Trigger |
 |----|------|--------|-------------|---------------|---------|
-| REQ-1.2.3 | Mandatory | [C-1] Article 2, Item 3 | {one-sentence description of what is required} | Field presence | — |
-| REQ-3.1 | Conditional | [C-1] Article 4 | {one-sentence description of what is required} | Logic consistency | {the condition that triggers this requirement} |
+| REQ-1.2.3 | Mandatory | [C-1] Article 2, Item 3 | {one-sentence description} | Field presence | — |
+| REQ-3.1 | Conditional | [C-1] Article 4 | {one-sentence description} | Logic consistency | {triggering condition} |
 
 - **ID** — the hierarchical REQ-{ID} from §1.1.
 - **Type** — Disqualifying / Mandatory / Conditional / Advisory.
-- **Source** — [C-{N}] plus the original document label (e.g. "Article 2, Item 3" or a page reference).
+- **Source** — [C-{N}] plus the original label (e.g. "Article 2, Item 3" or a page reference).
 - **Check method** — Field presence / Keyword match / Numeric or format check / Logic consistency.
-- **Trigger** — for Conditional rows only, state the condition; leave as `—` for every other type.
+- **Trigger** — for Conditional rows only; `—` for every other type.
 
-For a long table, build it the same incrementally-across-chunks way as the rest
-of Phase 1 — append rows as each chunk is parsed rather than holding the whole
-table until the end.
+For a long table, build it incrementally across chunks like the rest of Phase
+1 — append rows as each chunk is parsed.
 
 ### 1.3 Checkpoint — Confirm Criteria Checklist
 
@@ -466,28 +367,24 @@ Please confirm this looks complete. Add any missing requirements before I begin 
 
 Wait for user confirmation before moving to Phase 2.
 
-**If the user responds with a change** (add/remove/edit a requirement) instead of a
-plain confirmation: apply the change, then briefly describe what was changed (e.g.
-"Added REQ-7 per your note; removed REQ-3.2 as not applicable"), followed by the
-**entire updated summary** in the same format above, and wait for confirmation
-again. Do not proceed to Phase 2 on the same turn a change was applied; the user
-needs to see the resulting checklist as a whole (a one-line change can shift totals,
-interact with another requirement, or be misapplied) before approving it. Repeat
-this apply → describe → re-present → wait loop for as many rounds as the user keeps
-requesting changes. Only move on once a turn's response is an actual confirmation
-with no further changes requested.
+**If the user responds with a change** (add/remove/edit a requirement) instead of
+a plain confirmation: apply it, briefly describe what changed (e.g. "Added REQ-7
+per your note; removed REQ-3.2 as not applicable"), then re-present the **entire
+updated summary** in the same format and wait for confirmation again. Don't
+proceed to Phase 2 on the same turn a change was applied — the user needs to see
+the resulting checklist as a whole, since a one-line change can shift totals or
+interact with another requirement. Repeat apply → describe → re-present → wait
+for as many rounds as needed. Only move on once a turn's response is an actual
+confirmation with no further changes.
 
 ---
 
 ## Phase 2: Document Matching & Scoring
 
 Scan the pending documents and score each requirement in the Criteria Checklist.
-
-For a large Criteria Checklist, narrate progress in batches as you score (e.g.
-"Scored requirements 1-10 of 42...") rather than going silent until everything is
-scored — see "Calling Scripts" above; this applies even though scoring is your own
-reasoning with no job to poll. Stay in the same turn across batches as long as
-you're making steady progress.
+For a large checklist, narrate progress in batches (e.g. "Scored requirements
+1-10 of 42...") rather than going silent until everything is scored, even though
+scoring is your own reasoning with no job to poll.
 
 ### 2.1 Coverage Score Scale
 
@@ -518,30 +415,29 @@ you're making steady progress.
 - Do facts in one section contradict facts in another?
 - Do referenced attachments actually exist in the pending documents?
 - Are figures, dates, and named parties consistent throughout?
-- Run this check on every validation and surface any contradictions in Gap Details.
+- Run this check on every validation; surface contradictions in Gap Details.
 
 ### 2.3 Handling Conditional Requirements
 
-Before scoring a Conditional requirement, verify whether the trigger condition applies.
-If not, mark the requirement as N/A and exclude it from scoring.
+Before scoring a Conditional requirement, verify whether the trigger condition
+applies. If not, mark it N/A and exclude it from scoring.
 
 ### 2.4 Source Tracking
 
-For every requirement scored, record which document(s) the evidence was found in.
-Use the document IDs assigned in Phase 0.
-
-When scoring, note the source inline:
+For every requirement scored, record which document(s) the evidence was found in,
+using the IDs assigned in Phase 0:
 
 ```
 REQ-{ID}: evidence found in [P-1] §3.2 and [P-3] p.7
 ```
 
-When a requirement is met across multiple documents, list all sources.
-When no evidence is found in any document, note "not found in any pending document."
+List all sources when a requirement is met across multiple documents. When no
+evidence is found anywhere, note "not found in any pending document."
 
 ### 2.5 Handling Ambiguous Cases
 
-When the pending documents partially address a requirement, show the reasoning inline:
+When the pending documents partially address a requirement, show the reasoning
+inline:
 
 ```
 [Ambiguous match] REQ-{ID}: {requirement description}
@@ -555,30 +451,24 @@ Flag for manual review: {yes/no — explain if yes}
 ```
 
 Flag for manual review when:
-- The criteria's language itself is vague (e.g., "attach relevant documents"
-  without specifying which)
-- The pending document's intent is reasonable but wording deviates significantly
-  from required terminology
+- The criteria's language itself is vague (e.g. "attach relevant documents" without specifying which)
+- The pending document's intent is reasonable but wording deviates significantly from required terminology
 - A judgment call is needed that exceeds textual analysis
 
 ---
 
 ## Phase 3: Report Generation
 
-The report follows the same response-language rule as the rest of this skill (see
-"Response Language" above) — it does not switch to the input documents' language
-just because that's what's being analyzed. The following identifiers are system
-tracking symbols and are never translated regardless of language: REQ-{ID} (e.g.
-REQ-1.2), C-1/C-2/C-3, P-1/P-2/P-3.
+The report follows the same response-language rule as the rest of this skill
+(see "Response Language" above) — it does not switch to the documents' language
+just because that's what's being analyzed. These identifiers are system tracking
+symbols, never translated: REQ-{ID} (e.g. REQ-1.2), C-1/C-2/C-3, P-1/P-2/P-3.
 
-**Produce the report section by section, narrating as you go** (see "Calling
-Scripts" above — this applies to your own generation, not just script jobs). For a
-pending documents with dozens of requirements, generating the entire report — every
-table, every Gap entry, every manual-review row — in one uninterrupted block can
-itself take a while even though no script is involved. Say what's coming next
-after each section below; stay in the same turn across sections as long as you're
-producing steady output, and only end a turn early if generation is genuinely
-taking long enough that a status update is overdue.
+**Produce the report section by section, narrating as you go** — even with no
+script involved, generating a long report in one uninterrupted block can itself
+take a while. Say what's coming next after each part (e.g. "Executive summary
+above — detailed results for the 32 mandatory requirements next."), and stay in
+the same turn across sections as long as you're producing steady output.
 
 A reasonable split:
 1. Executive Summary (short — compliance rate and disposition)
@@ -587,17 +477,13 @@ A reasonable split:
 4. Gap Details
 5. Items Requiring Manual Review
 
-Say what's coming next at the end of each part (e.g. "Executive summary above —
-detailed results for the 32 mandatory requirements next."), so the user knows more is
-on the way rather than mistaking a section for the whole report.
-
 ```
 # Document Validation Report
 
-Pending document(s):   {document name(s)}
-Criteria:                 {criteria document name(s)}
-Case number:  {if provided by user, otherwise leave blank}
-Review date:  {date}
+Pending document(s): {document name(s)}
+Criteria:            {criteria document name(s)}
+Case number:         {if provided by user, otherwise leave blank}
+Review date:         {date}
 
 ---
 
@@ -643,16 +529,15 @@ Disposition recommendation: {see disposition rules below}
 
 {Cover only items scored below 90%.}
 
-When multiple requirements are deficient due to the same missing document or the same
-root cause, consolidate them into a single Gap entry. List all affected REQ-{ID}
-identifiers together. This makes the report easier to act on — the party that
-submitted the pending documents sees one clear action item instead of repeated entries for
-the same underlying gap.
+When multiple requirements are deficient due to the same missing document or the
+same root cause, consolidate into a single Gap entry listing all affected
+REQ-{ID}s together — one clear action item instead of repeated entries for the
+same underlying gap.
 
 **REQ-{ID} [, REQ-{ID}, ...]: {shared description if consolidated, or individual requirement}**
 - What is missing or insufficient: {specific explanation}
 - Evidence found in: {[P-{N}] §{section}, or "not found in any pending document"}
-- Criteria reference: {[C-{N}] §{original document label, e.g. "Article 2, Item 3"} [, C-{N}] §{...} if consolidated}
+- Criteria reference: {[C-{N}] §{original label, e.g. "Article 2, Item 3"} [, C-{N}] §{...} if consolidated}
 - Deficiency type: Correctable / Substantive / Indeterminate
 - Suggested correction: {what should be added or fixed, or "N/A — substantive non-compliance" / "Indeterminate — requires manual review"}
 
@@ -660,116 +545,98 @@ the same underlying gap.
 
 ## Items Requiring Manual Review
 
-{List all items flagged as "Requires manual review" during scoring.
-If none, write: "No items require manual review."}
+{List all items flagged "Requires manual review" during scoring.
+If none: "No items require manual review."}
 
 | ID       | Requirement   | Reason for manual review                  | Criteria reference |
 |----------|--------------|-------------------------------------------|----------------------|
-| REQ-{ID} | {description} | {why automated scoring was not possible} | [C-{N}] §{original document label}   |
+| REQ-{ID} | {description} | {why automated scoring was not possible} | [C-{N}] §{original label}   |
 
 ```
 
 ### Disposition Rules
 
-**Step 1 — Check for explicit disposition conditions in the criteria**
-If the criteria documents define explicit acceptance or rejection conditions,
-apply those first. They take precedence over all rules below. Note in the report
-which article or clause of the criteria the disposition is based on.
+**Step 1 — Check for explicit disposition conditions in the criteria.** If the
+criteria documents define explicit acceptance/rejection conditions, apply those
+first; they take precedence over the rules below. Note which article/clause the
+disposition is based on.
 
-**Step 2 — Apply default rules if no explicit disposition conditions exist**
-Note in the report: "No explicit disposition criteria found in the criteria documents.
-Default rules applied."
+**Step 2 — Apply default rules if no explicit conditions exist.** Note: "No
+explicit disposition criteria found in the criteria documents. Default rules
+applied."
 
-- **Approve** — all Disqualifying and Mandatory requirements are Compliant (≥ 90%),
-  and all applicable Conditional requirements are Compliant or Partial (≥ 70%),
-  and no cross-document contradictions are found.
+- **Approve** — all Disqualifying and Mandatory requirements are Compliant
+  (≥ 90%), all applicable Conditional requirements are Compliant or Partial
+  (≥ 70%), and no cross-document contradictions are found.
 
-- **Request correction** — no Disqualifying requirements have failed, and one or
-  more Mandatory or applicable Conditional requirements are Partial (70–89%) or
-  Weak (40–69%), and all deficient items are classified as Correctable, and no
-  cross-document contradictions involving Mandatory requirements are found.
+- **Request correction** — no Disqualifying requirement failed, one or more
+  Mandatory/applicable Conditional requirements are Partial (70–89%) or Weak
+  (40–69%), every deficient item is Correctable, and no cross-document
+  contradiction involves a Mandatory requirement.
 
-- **Return filing** — any of the following apply:
-  - Any Disqualifying requirement is not fully met
-  - Any Mandatory or applicable Conditional requirement is Missing (< 40%)
-  - Any deficient item is classified as Substantive (non-compliance cannot be
-    resolved by supplementation)
-  - A cross-document contradiction is found involving a Mandatory requirement
+- **Return filing** — any of: a Disqualifying requirement is not fully met; a
+  Mandatory/applicable Conditional requirement is Missing (< 40%); a deficient
+  item is Substantive (cannot be resolved by supplementation); a cross-document
+  contradiction involves a Mandatory requirement.
 
-- **Escalate for review** — one or more items are classified as Indeterminate or
-  flagged "Requires manual review", and the disposition cannot be determined without
-  human judgment. Do not issue a final disposition. List the blocking items clearly.
+- **Escalate for review** — one or more items are Indeterminate or flagged
+  "Requires manual review" and the disposition can't be determined without human
+  judgment. Don't issue a final disposition; list the blocking items clearly.
 
 ---
 
 ## Execution Guidelines
 
-These are standard situations to anticipate and handle during every validation.
-They are not exceptions — treat them as part of normal execution.
+These are routine situations to anticipate, not exceptions — handle them as part
+of normal execution. Each is a self-contained item; add, remove, or edit one
+without needing to touch the others.
 
-**Criteria document is image-based or scanned**
-Notify the user that the document appears to be image-based and that a text version
-will give more reliable results. Proceed with best-effort extraction and flag any
-requirements that could not be reliably read. `scripts/extract_pdf_text.py --summary-only`
-identifies which specific pages fall into this category before extraction begins.
+- **Criteria document is image-based or scanned** — Notify the user, proceed
+  with best-effort extraction, and flag any requirement that could not be
+  reliably read. `extract_pdf_text.py --summary-only` identifies affected pages
+  up front.
 
-**A page could not be read (scanned, technical drawing, or timed out)**
-`scripts/extract_pdf_text.py` flags pages it could not meaningfully process — scanned
-images, dense CAD drawings/3D renderings, or a page that hit `PDF_PAGE_TIMEOUT_SECONDS`
-— with an explicit note in the extracted Markdown instead of silently producing nothing.
-If a requirement's evidence would be expected on one of these pages, flag that
-requirement as "Requires manual review" and say which page and why (e.g. "p.9 — page is
-a technical drawing, content not extracted"). **Never mark a requirement as satisfied
-just because an unreadable page exists where a diagram or attachment was expected** —
-its presence is not evidence of its content, the same as a referenced attachment that
-was never provided (see below). Retrying extraction will not fix a page like this; it
-needs an actual human to look at the rendered page.
+- **A page could not be read (scanned, technical drawing, or timed out)** —
+  `extract_pdf_text.py` marks pages it couldn't process with an explicit note
+  in the Markdown rather than producing silent gaps. If a requirement's
+  evidence would be expected on such a page, flag it "Requires manual review"
+  with the page and reason (e.g. "p.9 — technical drawing, content not
+  extracted"). **Never mark a requirement satisfied just because an unreadable
+  page exists where evidence was expected** — its presence isn't evidence of
+  its content, same as a referenced attachment never provided. Retrying
+  extraction won't fix this; it needs a human to look at the rendered page.
 
-**Multiple documents provided on either side**
-Treat all criteria documents as a unified set of criteria — requirements may be spread
-across the main document and supporting references. Treat all pending documents as a
-single unified set — evidence for any requirement may appear in the main document or
-in any attachment. Always record the specific source document ID and location for
-every piece of evidence found.
+- **Multiple documents on either side** — Treat all criteria documents as one
+  unified set of criteria, and all pending documents as one unified set —
+  evidence or requirements may be spread across the main document and any
+  attachment. Always record the specific source document ID and location for
+  every piece of evidence.
 
-**Pending document is very long (large PDF)**
-Use `scripts/extract_pdf_text.py` with `--start`/`--end` to pull the document in
-~20-page chunks rather than extracting the whole file at once (see §0.4 for why —
-chunk size is tied to the script's execution timeout, not just readability). Launch
-and narrate each chunk per §0.4's pattern, one at a time. Do not skip pages — a
-missed page is a missed requirement or a missed piece of evidence.
+- **Pending document is very long (large PDF)** — Use `--start`/`--end` to
+  pull it in ~20-page chunks (§0.4) rather than all at once. Don't skip
+  pages — a missed page is a missed requirement or piece of evidence.
 
-**Requirement involves subjective judgment**
-Do not assign a score. Flag the item as "Requires manual review" and describe
-what the reviewer should look for when making the judgment call.
+- **Requirement involves subjective judgment** — Don't assign a score. Flag
+  "Requires manual review" and describe what the reviewer should look for.
 
-**Criteria's language is vague**
-State the interpretation applied and flag the item for reviewer confirmation
-before finalizing the verdict on that item.
+- **Criteria's language is vague** — State the interpretation applied and flag
+  the item for reviewer confirmation before finalizing the verdict.
 
-**Referenced attachment is listed but not provided**
-Flag the item as "Requires manual review." Note that the attachment was referenced
-in the pending documents but not available for review. Do not assume its contents satisfy
-any requirement.
+- **Referenced attachment is listed but not provided** — Flag "Requires manual
+  review." Note that it was referenced but not available for review — don't
+  assume its contents satisfy any requirement.
 
-**Date-range compliance checks**
-When the criteria specify a maximum elapsed time between two dates (e.g. "document
-must have been issued within X months of the application date"), always show the
-calculation explicitly before stating the verdict. The required steps are:
+- **Date-range compliance checks** — When the criteria specify a maximum
+  elapsed time between two dates (e.g. "must be issued within X months of the
+  application date"), show the calculation explicitly:
+  1. State the start date (e.g. document issue date)
+  2. State the stated period (e.g. 3 months)
+  3. Compute the expiry date using calendar months, not fixed day counts
+  4. State the reference date to compare against (e.g. submission date)
+  5. Compare reference date to expiry date and state the verdict
 
-1. State the start date (e.g. document issue date)
-2. State the stated period (e.g. 3 months)
-3. Compute and state the expiry date by adding the period to the start date using
-   calendar months, not fixed day counts
-4. State the reference date to compare against (e.g. the date the pending documents were submitted)
-5. Compare the reference date against the expiry date and state the verdict
+  Example: Issue date 2024-01-15, validity 3 months → expiry 2024-04-15.
+  Application date 2024-03-20 is before 2024-04-15 → Compliant.
 
-Example:
-- Issue date: 2024-01-15
-- Validity period: 3 months
-- Expiry date: 2024-04-15
-- Application date: 2024-03-20
-- 2024-03-20 is before 2024-04-15 → Compliant
-
-Do not skip steps or compare day counts directly. The explicit date comparison is
-required for every date-range check.
+  Do not skip steps or compare day counts directly — every date-range check
+  needs the explicit comparison.

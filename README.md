@@ -14,27 +14,32 @@ The agent does not simply scan for keywords. It builds a structured criteria che
 flowchart TD
     A([Start]) --> B
 
-    B["Phase 0 — Intake\nInventory all documents\nAssign IDs: C-1/C-2… P-1/P-2/P-3…"]
+    B["Phase 0 — Intake\nInventory documents, assign IDs (C-1/C-2…, P-1/P-2/P-3…)\nFetch uploads or Drive links · extract PDFs to Markdown"]
     B --> C
 
-    C["Phase 1 — Criteria Checklist Extraction\nParse the criteria → extract & classify every requirement\nDisqualifying · Mandatory · Conditional · Advisory"]
-    C --> D{User confirms\nprofile}
-    D -- Add / adjust --> C
+    C["Phase 1 — Criteria Checklist Extraction\nParse criteria → extract & classify every requirement\nDisqualifying · Mandatory · Conditional · Advisory"]
+    C --> D{User confirms\nchecklist?}
+    D -- Requests a change --> C
     D -- Confirmed --> E
 
-    E["Phase 2 — Document Matching & Scoring\nScore each requirement against the full pending documents\nField presence · Keyword match · Numeric · Logic consistency"]
+    E["Phase 2 — Document Matching & Scoring\nScore each requirement against the pending documents\nField presence · Keyword match · Numeric · Logic consistency"]
     E --> F
 
-    F["Phase 3 — Report Generation\nExecutive summary · Detailed results table\nGap details · Disposition recommendation"]
-    F --> G([End])
+    F["Phase 3 — Report Generation\nExecutive summary · Detailed results\nGap details · Manual review queue"]
+    F --> G{Disposition}
+
+    G -- "all Disqualifying/Mandatory\ncompliant, no contradictions" --> H([Approve])
+    G -- "correctable gaps only" --> I([Request correction])
+    G -- "Disqualifying failed or\nSubstantive non-compliance" --> J([Return filing])
+    G -- "needs human judgment" --> K([Escalate for review])
 ```
 
 ### Phase 0 — Intake
 The agent inventories all provided documents and assigns short IDs for traceability throughout the report (e.g. `C-1`, `C-2` for the criteria documents; `P-1`, `P-2`, `P-3` for the pending documents). If any document is unstructured or image-based, the agent announces this and proceeds with best-effort extraction.
 
-Documents that are too large to paste into chat can be provided as a Google Drive link instead (e.g. "Here is the pending document: https://drive.google.com/file/d/.../view"). The agent fetches the file using [`skill/scripts/fetch_drive_file.py`](skill/scripts/fetch_drive_file.py), which calls the Google Drive API directly — no chat-client connector required, so this also works when the skill runs as an agent deployed elsewhere (e.g. Google Agent Engine). It authenticates with Application Default Credentials, exports Google-native documents (Docs/Sheets/Slides) to PDF first so every document follows the same page-citation convention, and expands folder links into one inventory entry per file inside. The target file must be shared with whatever identity those credentials resolve to (the deployed service account, for example) — a public "anyone with the link" share is not required and, for sensitive government filings, usually shouldn't be used.
+Documents that are too large to paste into chat can be provided as a Google Drive link instead (e.g. "Here is the pending document: https://drive.google.com/file/d/.../view"). The agent fetches the file using [`skill/scripts/fetch_drive_file.py`](skill/scripts/fetch_drive_file.py), which calls the Google Drive API directly — no chat-client connector required, so this also works when the skill runs as an agent deployed elsewhere (e.g. Google Agent Engine). It authenticates with Application Default Credentials, exports Google-native documents (Docs/Sheets/Slides) to PDF first so every document follows the same page-citation convention, reads plain-text/Markdown files directly into context, and expands folder links into one inventory entry per file inside. The target file must be shared with whatever identity those credentials resolve to (the deployed service account, for example) — a public "anyone with the link" share is not required and, for sensitive government filings, usually shouldn't be used.
 
-For PDF inputs, the agent uses [`skill/scripts/extract_pdf_text.py`](skill/scripts/extract_pdf_text.py) to convert each page to Markdown — preserving page numbers for citation, rendering tables as real Markdown tables instead of jumbled text, and flagging pages that look scanned/image-based. Detected images are noted but not extracted, so a reviewer knows to check the original PDF for figures. Large PDFs are pulled in page-range chunks instead of one large dump, so a 100+ page criteria document doesn't need to be loaded all at once.
+For PDF inputs, the agent uses [`skill/scripts/extract_pdf_text.py`](skill/scripts/extract_pdf_text.py) to convert each page to Markdown — preserving page numbers for citation, rendering tables as real Markdown tables instead of jumbled text, and flagging pages that look scanned/image-based. Detected images are noted but not extracted, so a reviewer knows to check the original PDF for figures. A page that takes too long (a large embedded image) or is dense with vector graphics (a CAD/3D drawing) is flagged rather than left to stall the whole extraction. Large PDFs are pulled in page-range chunks instead of one large dump, so a 100+ page criteria document doesn't need to be loaded all at once.
 
 ### Phase 1 — Criteria Checklist Extraction
 The agent parses the criteria documents and extracts every requirement, classifying each one by type:
@@ -76,36 +81,60 @@ Disposition options: *Approve* / *Request correction* / *Return filing* / *Escal
 
 ## How to Use
 
-**Step 1** — Provide your documents:
+**Step 1** — Describe what you're validating and provide the documents — PDFs
+as a Google Drive link (or a direct upload), plain text/Markdown pasted right
+into the message. The criteria don't have to be a regulation; a few example
+scenarios:
+
+### Scenario: Grant/Subsidy Application Review
 
 > Please validate this application package:
 >
 > Criteria Documents:
-> - subsidy-program-guidelines.pdf
-> - application-format-requirements.pdf
+> - subsidy-program-guidelines.pdf — https://drive.google.com/file/d/1AbCdEfGhIjKlMnOpQrStUvWxYz/view
+> - application-format-requirements.md — pasted below:
+>
+> ```
+> # Application Format Requirements
+> 1. Cover page with applicant name, business license number, and submission date
+> 2. Project proposal: max 10 pages, must include a line-item budget table
+> 3. Required attachments: financial statement, project proposal, declaration letter
+> ```
 >
 > Pending Documents:
-> - application-form-main.pdf
-> - attachment-1-financial-statement.pdf
-> - attachment-2-project-proposal.pdf
+> - application-form-main.pdf — https://drive.google.com/file/d/1QwErTyUiOpAsDfGhJkLzXcVbNm/view
+> - attachment-1-financial-statement.pdf — https://drive.google.com/file/d/1ZxCvBnMqWeRtYuIoPaSdFgHjKl/view
+> - attachment-2-project-proposal.pdf — https://drive.google.com/file/d/1MnBvCxZaQwErTyUiOpLkJhGfDs/view
 
-Files too large to paste into chat can be sent as a Google Drive link instead:
+### Scenario: Tender Document Review
 
-> Here is the pending document: https://drive.google.com/file/d/1AbCdEfGhIjKlMnOpQrStUvWxYz/view
+> Check whether this vendor's bid meets every mandatory requirement in our tender spec:
+>
+> Criteria Documents:
+> - tender-specification.pdf — https://drive.google.com/file/d/1TenderSpecAbCdEfGhIjKlMnOp/view
+>
+> Pending Documents:
+> - vendor-bid-acme-corp.pdf — https://drive.google.com/file/d/1VendorBidAbCdEfGhIjKlMnOp/view
 
-The criteria don't have to be a regulation — any document that defines what's required works, e.g. review-committee comments checked against a project proposal:
+### Scenario: Committee Feedback Review
 
-> Check this project proposal against the review committee's comments and the contractor's stated commitments — make sure everything they committed to is clearly reflected in the proposal.
+> Check this project proposal against the review committee's comments and the
+> contractor's stated commitments — make sure everything they committed to is
+> clearly reflected in the proposal.
 >
 > https://drive.google.com/file/d/1AbCdEfGhIjKlMnOpQrStUvWxYz/view
 
-**Step 2** — Receive the validation report:
+In every scenario, the agent inventories the documents and confirms a Criteria
+Checklist with you before scoring (see Phase 1's checkpoint above).
 
+**Step 2** — Receive the validation report, e.g. for the Grant/Subsidy scenario above:
+
+```
 # Document Validation Report
 
-**Pending document(s):** application-form-main.pdf (+2 attachments)
-**Criteria:** subsidy-program-guidelines.pdf (+1 supporting doc)
-**Review date:** 2026-06-18
+Pending document(s): application-form-main.pdf (+2 attachments)
+Criteria:            subsidy-program-guidelines.pdf (+1 supporting doc)
+Review date:         2026-06-18
 
 ---
 
@@ -117,7 +146,7 @@ Overall compliance rate: 72%
 - ❌ Weak: 1 item
 - 🚫 Missing: 3 items
 
-**Disposition: Request correction**
+Disposition: Request correction
 
 ---
 
@@ -131,8 +160,8 @@ Overall compliance rate: 72%
 | REQ-2 | Project objectives stated | ✅ | 95% | [P-1] §2.3 | |
 | REQ-3.1.1 | Budget breakdown provided | ⚠️ | 74% | [P-3] p.4 | Expenditure categories missing |
 | REQ-4.1 | Financial statement attached | ✅ | 100% | [P-2] | |
-| REQ-4.2 | Declaration letter attached | 🚫 | 0% | — | Not found in any reviewed doc |
-| REQ-4.3 | Consent form attached | 🚫 | 0% | — | Not found in any reviewed doc |
+| REQ-4.2 | Declaration letter attached | 🚫 | 0% | — | Not found in any pending document |
+| REQ-4.3 | Consent form attached | 🚫 | 0% | — | Not found in any pending document |
 
 ### Conditional Requirements
 
@@ -145,18 +174,19 @@ Overall compliance rate: 72%
 
 ## Gap Details
 
-**REQ-4.2, REQ-4.3: Declaration letter and consent form not found in any reviewed document**
+REQ-4.2, REQ-4.3: Declaration letter and consent form not found in any pending document
 - What is missing: Both documents are absent from the pending documents
 - Criteria reference: [C-1] Article 4, Items 2–3
 - Deficiency type: Correctable
 - Suggested correction: Attach both documents and resubmit
 
-**REQ-3.1.1: Project proposal does not include required budget breakdown**
+REQ-3.1.1: Project proposal does not include required budget breakdown
 - What is missing: Expenditure categories not listed
 - Evidence found in: [P-3] p.4 (partial)
 - Criteria reference: [C-2] Appendix 1
 - Deficiency type: Correctable
 - Suggested correction: Add a line-item budget table per [C-2] Appendix 1
+```
 
 ---
 
