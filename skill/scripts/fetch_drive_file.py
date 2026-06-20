@@ -19,9 +19,18 @@ Usage:
   python3 fetch_drive_file.py abc123 --out /tmp/doc.pdf
   python3 fetch_drive_file.py "https://drive.google.com/drive/folders/xyz789" --list-only
   python3 fetch_drive_file.py abc123          # no --out: just print metadata
+  python3 fetch_drive_file.py abc123 --print-content   # plain-text/Markdown files only
+
+--print-content reads a plain-text or Markdown file's actual content straight to
+stdout — for a checklist or reference doc that's already text, not a PDF needing
+extract_pdf_text.py. There is otherwise no supported way to get a downloaded
+file's content back into context (read_asset only reaches files bundled with the
+skill itself, not anything fetched at runtime) — use this instead of improvising
+a workaround like writing to /dev/stdout.
 """
 
 import argparse
+import io
 import re
 import sys
 import time
@@ -30,6 +39,9 @@ from google.auth import default as google_auth_default
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaIoBaseDownload
+
+TEXT_MIME_PREFIXES = ("text/",)
+TEXT_MIME_TYPES = {"application/json"}
 
 DRIVE_URL_PATTERNS = [
     r"/file/d/([a-zA-Z0-9_-]+)",
@@ -81,6 +93,20 @@ def list_folder(service, folder_id):
     return results
 
 
+def is_text_mime(mime_type):
+    return mime_type.startswith(TEXT_MIME_PREFIXES) or mime_type in TEXT_MIME_TYPES
+
+
+def download_text_content(service, file_id):
+    request = service.files().get_media(fileId=file_id)
+    buf = io.BytesIO()
+    downloader = MediaIoBaseDownload(buf, request)
+    done = False
+    while not done:
+        _, done = downloader.next_chunk()
+    return buf.getvalue().decode("utf-8", errors="replace")
+
+
 def download_file(service, file_id, mime_type, out_path):
     if mime_type.startswith(GOOGLE_NATIVE_MIME_PREFIX):
         request = service.files().export_media(fileId=file_id, mimeType=EXPORT_MIME_FOR_NATIVE)
@@ -113,6 +139,11 @@ def main():
     parser.add_argument(
         "--list-only", action="store_true", help="If the target is a folder, list its contents instead of downloading"
     )
+    parser.add_argument(
+        "--print-content",
+        action="store_true",
+        help="Print a plain-text/Markdown file's content to stdout (not for PDFs — use extract_pdf_text.py)",
+    )
     args = parser.parse_args()
 
     try:
@@ -139,6 +170,25 @@ def main():
                 "\nThis is a folder — fetch each file inside individually using its ID above.",
                 file=sys.stderr,
             )
+        return
+
+    if args.print_content:
+        if meta["mimeType"].startswith(GOOGLE_NATIVE_MIME_PREFIX):
+            print(
+                f"'{meta['name']}' is a Google-native document ({meta['mimeType']}). Fetch it "
+                "with --out instead (it auto-exports to PDF) and read it with extract_pdf_text.py.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        if not is_text_mime(meta["mimeType"]):
+            print(
+                f"'{meta['name']}' is {meta['mimeType']}, not a plain-text format — --print-content "
+                "only supports text/Markdown/JSON files. Use --out to save it instead, then "
+                "extract_pdf_text.py if it's a PDF.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        print(download_text_content(service, file_id))
         return
 
     if not args.out:

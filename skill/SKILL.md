@@ -82,10 +82,12 @@ correctly. Launching it in the background and polling decouples the two.
 
 **The pattern for every script call:**
 1. `start_job` with the script name and its arguments → get back a `job_id`.
-2. `check_job` with that `job_id`:
-   - `[status] running` → tell the user what's in progress (e.g. "Still
-     downloading the 111MB submission file from Drive...") and check again shortly.
-     Repeat for as long as it takes.
+2. `check_job` with that `job_id`. This call itself waits a few seconds before
+   returning if the job hasn't finished yet — don't call it again immediately
+   after getting `[status] running` back; that wait is already real elapsed
+   time, not wasted time. For a job you expect to take a while, pass a larger
+   `wait_seconds` (up to the max) instead of polling rapidly.
+   - `[status] running` → see "Narrate progress, not every poll" below.
    - the script's actual output → the job is done, move on.
    - `[error] ...` → handle it per that script's own error guidance (e.g. §0.4's
      notes on timeout errors).
@@ -93,14 +95,28 @@ correctly. Launching it in the background and polling decouples the two.
    instead of waiting idle — e.g. the next chunk, or a second document's
    extraction. They run concurrently in the background.
 
-**Always narrate, even though nothing is technically blocking you.** A background
-job is invisible to the user unless you say something — silence for any noticeable
-stretch reads as "stuck," whether or not a tool call is actually blocking. Give a
-short status line every time you check a job that's still running, and whenever
-you start a new one. This applies just as much when the long-running thing is your
-own reasoning rather than a script — e.g. scoring dozens of requirements in Phase
-2 has no job to poll, but narrate progress at natural checkpoints anyway (e.g.
-"Scored requirements 1–10 of 42...") so the user can see the work is moving.
+**Narrate progress, not every poll.** A background job is invisible to the user
+unless you say something — silence for a long stretch reads as "stuck." But
+narrating *every single* `check_job` call produces a wall of repetitive "still
+waiting" messages that's worse than silence — it buries the one update that
+actually matters. Say something when you start a job, and again roughly once
+every 30–60 seconds of real elapsed waiting (a handful of `check_job` calls,
+not one), or whenever the situation actually changes (e.g. you now know why it's
+slow, or you've decided to adjust your approach) — not on every individual
+`[status] running` response. This applies just as much when the long-running
+thing is your own reasoning rather than a script — e.g. scoring dozens of
+requirements in Phase 2 has no job to poll, but narrate progress at natural
+checkpoints anyway (e.g. "Scored requirements 1–10 of 42...") rather than after
+every single one.
+
+**Never mention internal tool or script names, file paths, or your own
+troubleshooting process in what you say to the user.** "Still downloading the
+submission file from Drive..." is fine; "checking fetch_drive_file.py's
+parameters to find the best way to read this" or "trying /dev/stdout" is not —
+the user doesn't need or want to know which script, which flag, or what you tried
+that didn't work. Describe what's happening in plain, functional terms: what
+document, what step, roughly how far along. Save implementation-level detail for
+when something has genuinely failed and a human needs to intervene.
 
 **End the turn only if something is genuinely still running**, not as a default
 habit after every chunk. If everything you started finishes within the same turn,
@@ -186,11 +202,12 @@ then poll and narrate per the "Calling Scripts" pattern (e.g. "Still downloading
 |--------|---------|------|
 | PDF file | `python3 scripts/fetch_drive_file.py "{url}" --out /tmp/{doc-id}.pdf` | Run the saved file through §0.4 (PDF extraction) exactly as an uploaded PDF |
 | Google-native doc (Docs/Sheets/Slides) | Same command — the script auto-exports these to PDF | Run through §0.4 — exporting to PDF first keeps page-citation conventions consistent across every document regardless of original source |
+| Plain-text/Markdown file (not a PDF, not Google-native) | `python3 scripts/fetch_drive_file.py "{url}" --print-content` | Reads the content directly into context — no separate save/extract step needed |
 | Folder link | `python3 scripts/fetch_drive_file.py "{url}" --list-only` | Lists every file inside with its own ID; repeat steps 1–2 for each one as its own inventory entry (regulation or submission, per what the user said the folder contains) |
 
-If a file's format can't be exported to PDF and isn't already a PDF, download it as-is
-and read it directly; note in the inventory that page-level citation may not be
-available for that document, and cite by section/heading instead.
+For any other format that can't be exported to PDF and isn't plain text either,
+download it with `--out` and note in the inventory that page-level citation may
+not be available for that document; cite by section/heading instead.
 
 **4. Record provenance in the document inventory** — note that the document came from
 a Drive link rather than a direct upload, so the source is traceable if anyone needs
@@ -290,8 +307,19 @@ A single page — usually one with a large or complex embedded image — can als
 get individually capped: if a page takes longer than `PDF_PAGE_TIMEOUT_SECONDS`
 (default 30s, see `.env.example`), the script skips just that page and marks it
 "*[Page processing timed out...]*" instead of letting it stall the whole chunk.
-Treat pages flagged this way the same as scanned/image-based pages — they need
-manual review, and retrying the same chunk won't fix them.
+Dense technical drawings (CAD, 3D renderings) are detected even faster and
+flagged as "*[Page appears to be a technical drawing/diagram...]*" without
+spending the full timeout on them at all. Treat pages flagged either way the
+same as scanned/image-based pages — they need manual review. **Trust the flag
+immediately; don't re-extract or single-page-probe the same page hoping for a
+different result** — the result won't change, and probing page by page to find
+where drawings end and text resumes wastes calls that a table of contents (if
+the document has one) already answers directly. If an early chunk's content
+included a table of contents, use the section/page numbers it gives you to jump
+straight to the next text-heavy section instead of guessing — e.g. if the TOC
+shows a "Drawings" chapter spanning pages 7–25 followed by a "Regulatory Review"
+chapter starting at page 26, extract pages 26+ next, not a string of single-page
+probes at 20, 25, 30, 35... to find that boundary by trial and error.
 
 Launch each chunk via `start_job` and narrate per the "Calling Scripts" pattern.
 **Don't start the next chunk of the same file until the current one finishes** —

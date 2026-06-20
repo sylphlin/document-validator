@@ -5,8 +5,20 @@ import signal
 import subprocess
 import sys
 import threading
+import time
 import uuid
 from pathlib import Path
+
+# check_job blocks for up to this long (polling internally) before returning
+# "[status] running" if the job hasn't finished yet. Without this, nothing
+# stops the model from calling check_job again the instant it gets "running"
+# back — with no real time passing between calls, a multi-minute job turns
+# into dozens of near-identical "still waiting" tool calls and narration
+# lines in a row. Capped rather than unbounded so a single check_job call
+# can't itself become the thing that runs long enough to trip a turn-level
+# timeout.
+DEFAULT_CHECK_JOB_WAIT_SECONDS = 5
+MAX_CHECK_JOB_WAIT_SECONDS = 15
 
 # A single container instance serves many conversations over its lifetime, not
 # one container per conversation — every finished job's full stdout (e.g. an
@@ -115,15 +127,23 @@ def make_tools(skill_dir: Path, timeout: int = 60):
         threading.Thread(target=_run_job, args=(job_id, script_path, list(args)), daemon=True).start()
         return job_id
 
-    def check_job(job_id: str) -> str:
-        with jobs_lock:
-            job = jobs.get(job_id)
+    def check_job(job_id: str, wait_seconds: int = DEFAULT_CHECK_JOB_WAIT_SECONDS) -> str:
+        wait_seconds = max(0, min(wait_seconds, MAX_CHECK_JOB_WAIT_SECONDS))
+        deadline = time.time() + wait_seconds
+        while True:
+            with jobs_lock:
+                job = jobs.get(job_id)
 
-        if job is None:
-            return f"[error] unknown job_id: {job_id}"
+            if job is None:
+                return f"[error] unknown job_id: {job_id}"
 
-        if job["status"] == "running":
-            return "[status] running"
+            if job["status"] != "running":
+                break
+
+            remaining = deadline - time.time()
+            if remaining <= 0:
+                return "[status] running"
+            time.sleep(min(0.5, remaining))
 
         if job["status"] == "done":
             return job["stdout"]
@@ -170,9 +190,13 @@ def make_tools(skill_dir: Path, timeout: int = 60):
         "Pass the returned job_id to check_job to poll for the result."
     )
     check_job.__doc__ = (
-        "Poll a job started by start_job. Returns '[status] running' if it's still "
-        "in progress, the script's output if it finished, or '[error] ...' if it "
-        "failed. Call this again after a short wait if the status is still running."
+        "Poll a job started by start_job. Waits up to wait_seconds (default "
+        f"{DEFAULT_CHECK_JOB_WAIT_SECONDS}, max {MAX_CHECK_JOB_WAIT_SECONDS}) for it to "
+        "finish before returning — this call itself takes real time, so there's no need "
+        "to call it again immediately after getting '[status] running' back. Returns the "
+        "script's output if it finished, '[error] ...' if it failed, or '[status] running' "
+        "if it's still going after the wait. Call again (optionally with a longer "
+        "wait_seconds) if still running."
     )
 
     return start_job, check_job, read_asset

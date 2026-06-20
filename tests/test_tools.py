@@ -8,7 +8,10 @@ from agent.tools import make_tools
 def _wait_for_result(check_job, job_id, timeout=5):
     deadline = time.time() + timeout
     while time.time() < deadline:
-        result = check_job(job_id)
+        # wait_seconds=0: check once and return immediately rather than
+        # blocking inside check_job itself, so this test loop's own polling
+        # interval (not check_job's internal wait) controls the cadence.
+        result = check_job(job_id, wait_seconds=0)
         if result != "[status] running":
             return result
         time.sleep(0.02)
@@ -35,8 +38,31 @@ def test_check_job_reports_running_before_completion(skill_dir):
     (skill_dir / "scripts" / "slow.py").write_text("import time; time.sleep(0.3)")
     start_job, check_job, _ = make_tools(skill_dir)
     job_id = start_job("slow.py", [])
-    assert check_job(job_id) == "[status] running"
+    assert check_job(job_id, wait_seconds=0) == "[status] running"
     _wait_for_result(check_job, job_id)
+
+
+def test_check_job_waits_before_returning_running(skill_dir):
+    (skill_dir / "scripts" / "slow.py").write_text("import time; time.sleep(0.3)")
+    start_job, check_job, _ = make_tools(skill_dir)
+    job_id = start_job("slow.py", [])
+    started = time.time()
+    result = check_job(job_id, wait_seconds=0.1)
+    elapsed = time.time() - started
+    assert result == "[status] running"
+    assert elapsed >= 0.1
+    _wait_for_result(check_job, job_id)
+
+
+def test_check_job_returns_early_once_job_finishes_within_wait(skill_dir):
+    (skill_dir / "scripts" / "quick.py").write_text("print('done quickly')")
+    start_job, check_job, _ = make_tools(skill_dir)
+    job_id = start_job("quick.py", [])
+    started = time.time()
+    result = check_job(job_id, wait_seconds=5)
+    elapsed = time.time() - started
+    assert result == "done quickly\n"
+    assert elapsed < 4, "should have returned as soon as the job finished, not waited the full 5s"
 
 
 def test_check_job_returns_error_on_failure(skill_dir):
@@ -194,7 +220,7 @@ def test_running_job_is_never_evicted(skill_dir):
             job_id = start_job("hello.py", [])
             _wait_for_result(check_job, job_id)
 
-        result = check_job(slow_job_id)
+        result = check_job(slow_job_id, wait_seconds=0)
         assert not result.startswith("[error] unknown job_id"), "running job was evicted"
         _wait_for_result(check_job, slow_job_id)
     finally:
