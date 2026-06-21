@@ -117,64 +117,54 @@ Checklist with you before scoring (see Phase 1's checkpoint above).
 
 **Step 2** — Receive the validation report, e.g. for the Grant/Subsidy scenario above:
 
-```
-# Document Validation Report
-
-Pending document(s): application-form-main.pdf (+2 attachments)
-Criteria:            subsidy-program-guidelines.pdf (+1 supporting doc)
-Review date:         2026-06-18
-
----
-
-## Executive Summary
-
-Overall compliance rate: 72%
-- ✅ Compliant: 11 items
-- ⚠️ Partial: 3 items
-- ❌ Weak: 1 item
-- 🚫 Missing: 3 items
-
-Disposition: Request correction
-
----
-
-## Detailed Results
-
-### Mandatory Requirements
-
-| ID | Requirement | Result | Score | Source | Notes |
-|----|-------------|--------|-------|--------|-------|
-| REQ-1 | Applicant identity verified | ✅ | 98% | [P-1] §1.1 | |
-| REQ-2 | Project objectives stated | ✅ | 95% | [P-1] §2.3 | |
-| REQ-3.1.1 | Budget breakdown provided | ⚠️ | 74% | [P-3] p.4 | Expenditure categories missing |
-| REQ-4.1 | Financial statement attached | ✅ | 100% | [P-2] | |
-| REQ-4.2 | Declaration letter attached | 🚫 | 0% | — | Not found in any pending document |
-| REQ-4.3 | Consent form attached | 🚫 | 0% | — | Not found in any pending document |
-
-### Conditional Requirements
-
-| ID | Requirement | Trigger applies? | Result | Score | Source | Notes |
-|----|-------------|-----------------|--------|-------|--------|-------|
-| REQ-5 | Environmental impact statement | Yes | ⚠️ | 78% | [P-3] §5 | Summary only; full assessment not attached |
-| REQ-6 | Co-applicant authorization letter | No | ➖ N/A | — | — | |
-
----
-
-## Gap Details
-
-REQ-4.2, REQ-4.3: Declaration letter and consent form not found in any pending document
-- What is missing: Both documents are absent from the pending documents
-- Criteria reference: [C-1] Article 4, Items 2–3
-- Deficiency type: Correctable
-- Suggested correction: Attach both documents and resubmit
-
-REQ-3.1.1: Project proposal does not include required budget breakdown
-- What is missing: Expenditure categories not listed
-- Evidence found in: [P-3] p.4 (partial)
-- Criteria reference: [C-2] Appendix 1
-- Deficiency type: Correctable
-- Suggested correction: Add a line-item budget table per [C-2] Appendix 1
-```
+> **Document Validation Report**
+>
+> Pending document(s): application-form-main.pdf (+2 attachments)
+> Criteria: subsidy-program-guidelines.pdf (+1 supporting doc)
+> Review date: 2026-06-18
+>
+> **Executive Summary**
+>
+> Overall compliance rate: 72%
+> - ✅ Compliant: 11 items
+> - ⚠️ Partial: 3 items
+> - ❌ Weak: 1 item
+> - 🚫 Missing: 3 items
+>
+> Disposition: Request correction
+>
+> **Detailed Results — Mandatory Requirements**
+>
+> | ID | Requirement | Result | Score | Source | Notes |
+> |----|-------------|--------|-------|--------|-------|
+> | REQ-1 | Applicant identity verified | ✅ | 98% | [P-1] §1.1 | |
+> | REQ-2 | Project objectives stated | ✅ | 95% | [P-1] §2.3 | |
+> | REQ-3.1.1 | Budget breakdown provided | ⚠️ | 74% | [P-3] p.4 | Expenditure categories missing |
+> | REQ-4.1 | Financial statement attached | ✅ | 100% | [P-2] | |
+> | REQ-4.2 | Declaration letter attached | 🚫 | 0% | — | Not found in any pending document |
+> | REQ-4.3 | Consent form attached | 🚫 | 0% | — | Not found in any pending document |
+>
+> **Detailed Results — Conditional Requirements**
+>
+> | ID | Requirement | Trigger applies? | Result | Score | Source | Notes |
+> |----|-------------|-----------------|--------|-------|--------|-------|
+> | REQ-5 | Environmental impact statement | Yes | ⚠️ | 78% | [P-3] §5 | Summary only; full assessment not attached |
+> | REQ-6 | Co-applicant authorization letter | No | ➖ N/A | — | — | |
+>
+> **Gap Details**
+>
+> REQ-4.2, REQ-4.3: Declaration letter and consent form not found in any pending document
+> - What is missing: Both documents are absent from the pending documents
+> - Criteria reference: [C-1] Article 4, Items 2–3
+> - Deficiency type: Correctable
+> - Suggested correction: Attach both documents and resubmit
+>
+> REQ-3.1.1: Project proposal does not include required budget breakdown
+> - What is missing: Expenditure categories not listed
+> - Evidence found in: [P-3] p.4 (partial)
+> - Criteria reference: [C-2] Appendix 1
+> - Deficiency type: Correctable
+> - Suggested correction: Add a line-item budget table per [C-2] Appendix 1
 
 ---
 
