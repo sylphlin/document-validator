@@ -343,6 +343,19 @@ Represent the requirements as a Markdown table, one row per requirement:
 - **Check method** — Field presence / Keyword match / Numeric or format check / Logic consistency.
 - **Trigger** — for Conditional rows only; `—` for every other type.
 
+**Optional "Proposed by" column** — if the criteria has a clear individual or
+unit attached to each requirement (e.g. a review committee's comments, where
+each comment is attributed to a specific member or department), add a
+"Proposed by" column after Source:
+
+| ID | Type | Source | Proposed by | Requirement | Check method | Trigger |
+|----|------|--------|-------------|-------------|---------------|---------|
+| REQ-2.1 | Mandatory | [C-1] Comment 3 | Committee Member: Dr. Chen | {one-sentence description} | Field presence | — |
+
+Only add this column when the criteria actually attribute requirements this
+way — leave it out entirely for criteria with no such attribution (e.g. most
+regulations and tender specs), rather than filling it with `—` on every row.
+
 For a long table, build it incrementally across chunks like the rest of Phase
 1 — append rows as each chunk is parsed.
 
