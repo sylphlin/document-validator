@@ -1,0 +1,7 @@
+name: document-validator
+displayName:
+  zh: 文件合規審查專員
+  en: Document Conformance Validator
+description:
+  zh: 自動化文件合規性審查智能體。能將法規、招標規格等規範文件與待審文件（如申請書、標書）進行系統性逐項比對，自動提取檢查清單、評分並產出落差分析稽核報告。
+  en: An automated document conformance agent that systematically validates pending documents (applications, bids, plans) against criteria documents (regulations, tender specs, checklists). It extracts requirements, scores coverage, and generates detailed audit reports.

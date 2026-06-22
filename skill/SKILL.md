@@ -414,6 +414,18 @@ scoring is your own reasoning with no job to poll.
 | 70–89%  | ⚠️ Partial     | Present but incomplete or vague |
 | 40–69%  | ❌ Weak        | Only indirectly related or severely insufficient |
 | 0–39%   | 🚫 Missing     | No corresponding content found |
+| —       | 🔍 Indeterminate | The only available evidence is content that was never actually read (an image, scanned page, technical drawing, or a page that timed out) |
+
+**Never assign Compliant/Partial/Weak/Missing based on content nobody actually
+read.** A page being image-based, scanned, or flagged by
+`extract_pdf_text.py` is not evidence of what it contains — it's the absence
+of evidence, same as a referenced attachment that was never provided. Use
+Indeterminate instead, route it to the Manual Review queue (§5 of the
+report), and say what the reviewer needs to check (e.g. "p.9 — diagram, not
+extracted; confirm it shows the required site layout"). This applies
+regardless of how plausible the surrounding context makes compliance look —
+a confident-sounding score without an actual read is worse than an honest
+"can't tell."
 
 ### 2.2 Scoring Logic by Check Method
 
@@ -464,16 +476,21 @@ inline:
 
 Source: [P-{N}] {section or page reference}
 Matched passage: "{quoted text from the pending documents}"
-Score: {X}% — {label}
+Score: {X}% — {label, or "— Indeterminate" if flagged below}
 Rationale: {what is covered and what is missing}
 Interpretation applied: {if a reasonable interpretation was used, explain it}
 Flag for manual review: {yes/no — explain if yes}
 ```
 
+If "Flag for manual review" is yes, the Score must be Indeterminate, not a
+numeric label — the two can never disagree. A confident-looking score paired
+with a manual-review flag tells the reviewer nothing they can act on.
+
 Flag for manual review when:
 - The criteria's language itself is vague (e.g. "attach relevant documents" without specifying which)
 - The pending document's intent is reasonable but wording deviates significantly from required terminology
 - A judgment call is needed that exceeds textual analysis
+- The only evidence available is content that wasn't actually read (image, scanned page, technical drawing) — see §2.1
 
 ---
 
@@ -510,11 +527,12 @@ Review date:         {date}
 ## Executive Summary
 
 Overall compliance rate: {X}%
-- Compliant  ✅: {N} items
-- Partial    ⚠️: {N} items
-- Weak       ❌: {N} items
-- Missing    🚫: {N} items
-- N/A        ➖: {N} items (conditional requirements that do not apply)
+- Compliant     ✅: {N} items
+- Partial       ⚠️: {N} items
+- Weak          ❌: {N} items
+- Missing       🚫: {N} items
+- Indeterminate 🔍: {N} items (could not be scored — see Manual Review)
+- N/A           ➖: {N} items (conditional requirements that do not apply)
 
 Disposition recommendation: {see disposition rules below}
 
@@ -529,6 +547,7 @@ Disposition recommendation: {see disposition rules below}
 | REQ-1.1 | {description} | ✅     | 95%   | [P-1] §3.1  | {brief note}               |
 | REQ-1.2 | {description} | ⚠️    | 74%   | [P-1] §4.2  | {what is missing or vague} |
 | REQ-2   | {description} | 🚫    | 5%    | —          | {not found}                |
+| REQ-2.3 | {description} | 🔍    | —     | [P-1] p.9   | {e.g. "diagram, not extracted — see Manual Review"} |
 
 ### Conditional Requirements
 
@@ -547,7 +566,8 @@ Disposition recommendation: {see disposition rules below}
 
 ## Gap Details
 
-{Cover only items scored below 90%.}
+{Cover every item scored below 90%, plus every Indeterminate item — the
+latter has no numeric score but is not Compliant either.}
 
 When multiple requirements are deficient due to the same missing document or the
 same root cause, consolidate into a single Gap entry listing all affected
@@ -612,19 +632,20 @@ of normal execution. Each is a self-contained item; add, remove, or edit one
 without needing to touch the others.
 
 - **Criteria document is image-based or scanned** — Notify the user, proceed
-  with best-effort extraction, and flag any requirement that could not be
-  reliably read. `extract_pdf_text.py --summary-only` identifies affected pages
-  up front.
+  with best-effort extraction, and score any requirement that could not be
+  reliably read as Indeterminate (§2.1), not Compliant/Partial/Weak/Missing.
+  `extract_pdf_text.py --summary-only` identifies affected pages up front.
 
 - **A page could not be read (scanned, technical drawing, or timed out)** —
   `extract_pdf_text.py` marks pages it couldn't process with an explicit note
   in the Markdown rather than producing silent gaps. If a requirement's
-  evidence would be expected on such a page, flag it "Requires manual review"
-  with the page and reason (e.g. "p.9 — technical drawing, content not
-  extracted"). **Never mark a requirement satisfied just because an unreadable
-  page exists where evidence was expected** — its presence isn't evidence of
-  its content, same as a referenced attachment never provided. Retrying
-  extraction won't fix this; it needs a human to look at the rendered page.
+  evidence would be expected on such a page, score it Indeterminate (§2.1) and
+  flag it "Requires manual review" with the page and reason (e.g. "p.9 —
+  technical drawing, content not extracted"). **Never mark a requirement
+  Compliant just because an unreadable page exists where evidence was
+  expected** — its presence isn't evidence of its content, same as a
+  referenced attachment never provided. Retrying extraction won't fix this;
+  it needs a human to look at the rendered page.
 
 - **Multiple documents on either side** — Treat all criteria documents as one
   unified set of criteria, and all pending documents as one unified set —

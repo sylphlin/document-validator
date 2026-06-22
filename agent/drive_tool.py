@@ -35,8 +35,16 @@ from googleapiclient.discovery import build
 DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.readonly"
 
 
+def _find_skill_dir() -> Path:
+    base = Path(__file__).parent
+    for c in [base / "skill", base.parent / "skill"]:
+        if c.exists():
+            return c
+    return base.parent / "skill"
+
+
 def _load_fetch_drive_file_module():
-    script_path = Path(__file__).parent.parent / "skill" / "scripts" / "fetch_drive_file.py"
+    script_path = _find_skill_dir() / "scripts" / "fetch_drive_file.py"
     spec = importlib.util.spec_from_file_location("fetch_drive_file", script_path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)

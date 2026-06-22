@@ -3,9 +3,10 @@ import re
 from pathlib import Path
 from dotenv import load_dotenv
 from google.adk.agents import LlmAgent
-from google.adk.models import Gemini
+from google.adk.models.google_llm import Gemini
 from google.genai import types
 from .drive_tool import fetch_drive_file_oauth
+from .llm import GeminiWithLocation
 from .skill_loader import load_skill
 from .tools import make_tools
 
@@ -14,9 +15,15 @@ load_dotenv()
 # Override GOOGLE_CLOUD_LOCATION for model calls (Dockerfile sets us-central1 for Agent Runtime,
 # but gemini-3.5-flash requires the global endpoint)
 os.environ["GOOGLE_GENAI_USE_VERTEXAI"] = "true"
-os.environ["GOOGLE_CLOUD_LOCATION"] = os.getenv("MODEL_LOCATION", "global")
+def _find_skill_dir() -> Path:
+    base = Path(__file__).parent
+    for c in [base / "skill", base.parent / "skill"]:
+        if c.exists():
+            return c
+    return base.parent / "skill"
 
-_DEFAULT_SKILL_DIR = Path(os.getenv("SKILL_DIR", str(Path(__file__).parent.parent / "skill")))
+
+_DEFAULT_SKILL_DIR = Path(os.getenv("SKILL_DIR", str(_find_skill_dir())))
 
 
 def _has_files(directory: Path) -> bool:
@@ -101,8 +108,9 @@ def build_agent(skill_dir: Path = _DEFAULT_SKILL_DIR) -> LlmAgent:
         # backing off and trying again. A long compliance-review conversation
         # makes enough model calls that hitting a transient 429 is expected,
         # not exceptional.
-        model=Gemini(
+        model=GeminiWithLocation(
             model=os.getenv("MODEL", "gemini-3.5-flash"),
+            location=os.getenv("MODEL_LOCATION", "global"),
             retry_options=types.HttpRetryOptions(
                 attempts=5, initial_delay=1, max_delay=30, exp_base=2, jitter=1,
                 http_status_codes=[429, 500, 502, 503, 504],
