@@ -1,4 +1,9 @@
 #!/usr/bin/env bash
+# Usage: ./deploy.sh [project-id] [region]
+# Positional args override GOOGLE_CLOUD_PROJECT/GOOGLE_CLOUD_LOCATION from
+# .env — handy for deploying the same checkout to a different project/region
+# without editing .env. Omit either to fall back to .env (or, for region, the
+# us-central1 default).
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -11,9 +16,17 @@ if [ -f .env ]; then
   set +a
 fi
 
+if [ -n "${1:-}" ]; then
+  GOOGLE_CLOUD_PROJECT="$1"
+fi
+if [ -n "${2:-}" ]; then
+  GOOGLE_CLOUD_LOCATION="$2"
+fi
+REGION="${GOOGLE_CLOUD_LOCATION:-us-central1}"
+
 # Validate required env vars
 if [ -z "${GOOGLE_CLOUD_PROJECT:-}" ]; then
-  echo "Error: GOOGLE_CLOUD_PROJECT is not set. Copy .env.example to .env and fill in your values." >&2
+  echo "Error: GOOGLE_CLOUD_PROJECT is not set. Pass it as the first argument (./deploy.sh <project-id>) or copy .env.example to .env and fill in your values." >&2
   exit 1
 fi
 if [ -z "${STAGING_BUCKET:-}" ]; then
@@ -43,14 +56,20 @@ cp requirements.txt "${STAGING_BASE}/"
 
 # .env is the single source of truth — forward it as-is to the runtime,
 # except deploy.sh's own bookkeeping (AGENT_ENGINE_ID, AGENT_CPU/MEMORY are
-# already consumed above; not meant for the running agent) and any
-# leftover empty-value line, which the Agent Platform API rejects outright
-# ("Required field is not set").
+# already consumed above; not meant for the running agent), GOOGLE_CLOUD_PROJECT/
+# GOOGLE_CLOUD_LOCATION (re-added below with the resolved values, so a project/
+# region override from positional args actually reaches the deployed agent),
+# and any leftover empty-value line, which the Agent Platform API rejects
+# outright ("Required field is not set").
 if [ -f .env ]; then
-  grep -vE '^(AGENT_ENGINE_ID|AGENT_CPU|AGENT_MEMORY)=' .env \
+  grep -vE '^(AGENT_ENGINE_ID|AGENT_CPU|AGENT_MEMORY|GOOGLE_CLOUD_PROJECT|GOOGLE_CLOUD_LOCATION)=' .env \
     | grep -vE '^[A-Za-z_][A-Za-z0-9_]*=[[:space:]]*$' \
     > "${STAGING_BASE}/.env"
 fi
+{
+  echo "GOOGLE_CLOUD_PROJECT=${GOOGLE_CLOUD_PROJECT}"
+  echo "GOOGLE_CLOUD_LOCATION=${REGION}"
+} >> "${STAGING_BASE}/.env"
 
 # Container resource_limits are derived from .env (AGENT_CPU / AGENT_MEMORY)
 # rather than a separate static file — keeps all tunables in one place.
@@ -67,7 +86,6 @@ DEPLOY_LOG="$(mktemp)"
 trap "rm -rf ${STAGING_BASE} ${DEPLOY_LOG}" EXIT
 
 AGENT_NAME=$(grep '^name:' skill/SKILL.md | head -1 | sed 's/name: *//')
-REGION="${GOOGLE_CLOUD_LOCATION:-us-central1}"
 
 # Reuse the existing Agent Engine instance if AGENT_ENGINE_ID is set in .env,
 # so this becomes a new revision of the same service instead of a brand new

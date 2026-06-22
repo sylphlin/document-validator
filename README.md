@@ -222,6 +222,8 @@ Edit `.env` — at minimum set `GOOGLE_CLOUD_PROJECT` and `STAGING_BUCKET`. Bump
 
 ```bash
 ./deploy.sh
+# Or override the project/region from .env without editing it:
+./deploy.sh <project-id> <region>
 ```
 
 This creates a local virtual environment, installs `requirements.txt`, and deploys to Google Cloud Agent Runtime (formerly Vertex AI Agent Engine). Redeploying after the first run updates the same instance (tracked via `AGENT_ENGINE_ID` in `.env`) instead of creating a new one.
