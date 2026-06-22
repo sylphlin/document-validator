@@ -131,14 +131,21 @@ re-upload.
 
 A Drive link is an expected input for large files (e.g. "Here is the pending
 document: https://drive.google.com/file/d/abc123/view"). Treat any
-`drive.google.com`/`docs.google.com` URL as a document, fetched via
-`scripts/fetch_drive_file.py`.
+`drive.google.com`/`docs.google.com` URL as a document.
 
-This script calls the Drive API directly (not a chat-client connector), since
-this skill may run where no such connector exists. It authenticates via
-Application Default Credentials — **the target file must be shared with that
-identity** (for a service account, its email address specifically, not "anyone
-with the link").
+**If the `fetch_drive_file_oauth` tool is available, use it instead of the
+steps below.** It authenticates as the signed-in user — files only need to be
+shared with that user normally, not with a deployed service account. Pass it
+the URL or bare ID directly (no `start_job`/`check_job` needed — it returns
+synchronously). If it returns `{"status": "pending_auth", ...}`, tell the user
+to complete the Google sign-in prompt, then call it again with the same
+`url_or_id`; don't treat this as an error or retry with the script below.
+
+Otherwise, fall back to `scripts/fetch_drive_file.py`, which calls the Drive
+API directly (not a chat-client connector) — this is what's available when no
+OAuth tool or connector exists. It authenticates via Application Default
+Credentials — **the target file must be shared with that identity** (for a
+service account, its email address specifically, not "anyone with the link").
 
 **1. Check what the link points to:**
 

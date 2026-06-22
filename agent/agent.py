@@ -5,6 +5,7 @@ from dotenv import load_dotenv
 from google.adk.agents import LlmAgent
 from google.adk.models import Gemini
 from google.genai import types
+from .drive_tool import fetch_drive_file_oauth
 from .skill_loader import load_skill
 from .tools import make_tools
 
@@ -55,6 +56,20 @@ def build_agent(skill_dir: Path = _DEFAULT_SKILL_DIR) -> LlmAgent:
     if has_assets:
         tools.append(read_asset)
         tool_lines.append("- read_asset: read a reference or asset file bundled with this skill")
+
+    # Only registered when an OAuth client is actually configured for this
+    # deployment — without it, the tool can't request user consent at all, and
+    # advertising it would just invite the model to call a tool that can never
+    # succeed. fetch_drive_file.py (service-account/ADC) remains the fallback.
+    has_oauth_drive = bool(os.getenv("GOOGLE_OAUTH_CLIENT_ID"))
+    if has_oauth_drive:
+        tools.append(fetch_drive_file_oauth)
+        tool_lines.append(
+            "- fetch_drive_file_oauth: fetch a Google Drive file/folder using the "
+            "signed-in user's own Drive permissions (no service-account sharing "
+            "needed) — prefer this over scripts/fetch_drive_file.py whenever it's "
+            "available"
+        )
 
     full_instruction = skill_body
     if tool_lines:

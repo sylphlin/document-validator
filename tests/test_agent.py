@@ -83,3 +83,18 @@ def test_build_agent_instruction_omits_ids_when_context_has_no_session(tmp_path)
         pass
 
     assert "session ID" not in agent.instruction(_ContextWithoutSession())
+
+
+def test_build_agent_excludes_oauth_drive_tool_by_default(tmp_path, monkeypatch):
+    monkeypatch.delenv("GOOGLE_OAUTH_CLIENT_ID", raising=False)
+    skill_dir = _make_skill(tmp_path)
+    agent = build_agent(skill_dir=skill_dir)
+    assert "fetch_drive_file_oauth" not in agent.instruction(None)
+
+
+def test_build_agent_includes_oauth_drive_tool_when_configured(tmp_path, monkeypatch):
+    monkeypatch.setenv("GOOGLE_OAUTH_CLIENT_ID", "test-client-id")
+    skill_dir = _make_skill(tmp_path)
+    agent = build_agent(skill_dir=skill_dir)
+    assert any(getattr(t, "__name__", "") == "fetch_drive_file_oauth" for t in agent.tools)
+    assert "fetch_drive_file_oauth" in agent.instruction(None)

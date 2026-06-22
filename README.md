@@ -175,13 +175,14 @@ document-validator/
 ├── agent/                  # ADK wrapper — loads skill/SKILL.md as the system prompt
 │   ├── __init__.py         # Exports root_agent for the ADK loader
 │   ├── agent.py            # LlmAgent construction
+│   ├── drive_tool.py       # fetch_drive_file_oauth — per-user OAuth Drive access (deployed only)
 │   ├── skill_loader.py     # SKILL.md frontmatter parser
 │   └── tools.py            # start_job/check_job (background script execution) and read_asset
 ├── skill/                  # The skill itself — this is what defines agent behavior
 │   ├── SKILL.md            # Phases, requirement types, report format, execution guidelines
 │   └── scripts/
 │       ├── extract_pdf_text.py   # PDF → Markdown, launched via start_job/check_job
-│       ├── fetch_drive_file.py   # Google Drive API fetch, launched via start_job/check_job
+│       ├── fetch_drive_file.py   # Google Drive API fetch (service account/ADC), launched via start_job/check_job
 │       └── gcs_state.py          # Backs up files/state with no other durable source to GCS
 ├── tests/                  # Wrapper unit tests (agent construction, tool execution)
 │   └── eval/                     # Behavior-level eval (see "Evaluation" below) — not pytest
@@ -194,7 +195,7 @@ document-validator/
 └── pyproject.toml          # Local dev dependencies and test config
 ```
 
-This repo is a complete, deployable agent: the [`agent/`](agent/) wrapper is a thin ADK loader (based on [agent-skill-wrapper](https://agentskills.io/specification)) that turns [`skill/SKILL.md`](skill/SKILL.md) into the agent's system prompt and exposes its `scripts/` as a callable tool. Nothing in `agent/` is specific to document validation — changing the agent's behavior means editing `skill/SKILL.md`, not the wrapper code.
+This repo is a complete, deployable agent: the [`agent/`](agent/) wrapper is a thin ADK loader (based on [agent-skill-wrapper](https://agentskills.io/specification)) that turns [`skill/SKILL.md`](skill/SKILL.md) into the agent's system prompt and exposes its `scripts/` as a callable tool. Nothing in `agent/` is specific to document validation — changing the agent's behavior means editing `skill/SKILL.md`, not the wrapper code. The one exception is [`drive_tool.py`](agent/drive_tool.py): it needs ADK's `ToolContext` to drive an OAuth consent flow, which only exists for a proper ADK FunctionTool — not for a subprocess script invoked via `start_job`/`check_job`. It's registered only when `GOOGLE_OAUTH_CLIENT_ID` is configured (see Deployment below); otherwise the agent falls back to `fetch_drive_file.py`.
 
 ## Evaluation
 
@@ -227,7 +228,9 @@ This creates a local virtual environment, installs `requirements.txt`, and deplo
 
 **3. Register with Gemini Enterprise** (optional): follow the Reasoning Engine Resource ID printed at the end of `deploy.sh`'s output to connect it as a custom agent in the Gemini Enterprise Admin Console.
 
-**Before deploying for real use:** the Google Drive fetch path requires the deployed service account to actually have access to the files reviewers will link to — see the Phase 0 note above. Share files with the service account's email address; "anyone with the link" is not required and usually shouldn't be used for government filings.
+**Before deploying for real use:** the default Google Drive fetch path requires the deployed service account to actually have access to the files reviewers will link to — see the Phase 0 note above. Share files with the service account's email address; "anyone with the link" is not required and usually shouldn't be used for government filings.
+
+**Optional — per-user Drive access instead of a service account:** set `GOOGLE_OAUTH_CLIENT_ID`/`GOOGLE_OAUTH_CLIENT_SECRET` in `.env` (see `.env.example`) to enable `agent/drive_tool.py`. With it configured, the agent accesses Drive as whichever user is signed in through Gemini Enterprise — that user's own files just need to be shared with them normally, no per-file sharing with the service account required. Create the OAuth client in Google Cloud Console → APIs & Services → Credentials (type "Web application", Drive API enabled, consent screen scoped to `drive.readonly`). Leave both blank to skip this and use the service-account path above.
 
 Agent Engine container instances are ephemeral and can be swapped between turns of the same conversation. Files saved only to local disk (a direct upload, or extraction state) don't survive that. `scripts/gcs_state.py` backs up what has no other durable source — see SKILL.md §0.0 and §1 — to a GCS bucket named `document-validator-sessions-{GOOGLE_CLOUD_PROJECT}`. Create it once and grant the deployed service account write access before deploying:
 
