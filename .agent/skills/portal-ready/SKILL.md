@@ -285,6 +285,11 @@ for arg in "$@"; do
   esac
 done
 
+if [ -n "$GE_APP_ID" ]; then
+  GE_APP_ID="${GE_APP_ID%/}"
+  GE_APP_ID="${GE_APP_ID##*/}"
+fi
+
 PROJECT_ID="${POSITIONAL[0]:?Usage: bash deploy.sh <PROJECT_ID> [REGION] [--ge APP_ID]}"
 REGION="${POSITIONAL[1]:-us-central1}"
 # >>> If custom SA needed, add these lines:
