@@ -19,7 +19,6 @@ done
 
 if [ -n "$GE_APP_ID" ]; then
   GE_APP_ID="${GE_APP_ID%/}"
-  GE_APP_ID="${GE_APP_ID##*/}"
 fi
 
 PROJECT_ID="${POSITIONAL[0]:?Usage: bash deploy.sh <PROJECT_ID> [REGION] [--ge APP_ID]}"
@@ -180,8 +179,13 @@ print(desc.get("en", desc) if isinstance(desc, dict) else desc)
         AGENT_DESC="$AGENT_NAME"
     fi
 
+    GE_API_URL="https://discoveryengine.googleapis.com/v1alpha/projects/${PROJECT_NUM}/locations/global/collections/default_collection/engines/${GE_APP_ID}/assistants/default_assistant/agents"
+    if [[ "$GE_APP_ID" == projects/* ]]; then
+        GE_API_URL="https://discoveryengine.googleapis.com/v1alpha/${GE_APP_ID}/assistants/default_assistant/agents"
+    fi
+
     REGISTER_RESPONSE=$(curl -s -X POST \
-      "https://discoveryengine.googleapis.com/v1alpha/projects/${PROJECT_NUM}/locations/global/collections/default_collection/engines/${GE_APP_ID}/assistants/default_assistant/agents" \
+      "$GE_API_URL" \
       -H "Authorization: Bearer ${ACCESS_TOKEN}" \
       -H "Content-Type: application/json" \
       -H "X-Goog-User-Project: ${PROJECT_NUM}" \
