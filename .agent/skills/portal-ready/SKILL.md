@@ -396,6 +396,9 @@ print(desc.get('en', desc) if isinstance(desc, dict) else desc)
       -d "{
         \"displayName\": \"${DISPLAY_NAME}\",
         \"description\": \"${AGENT_DESC}\",
+        \"icon\": {
+          \"uri\": \"https://fonts.gstatic.com/s/i/short-term/release/googlesymbols/smart_toy/default/24px.svg\"
+        },
         \"adk_agent_definition\": {
           \"tool_settings\": { \"tool_description\": \"${AGENT_DESC}\" },
           \"provisioned_reasoning_engine\": {
