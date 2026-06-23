@@ -1,5 +1,7 @@
 # document-validator
 
+[English (en)](README.md) | [繁體中文 (zh-TW)](README.zh-TW.md) | [简体中文 (zh-CN)](README.zh-CN.md) | [日本語 (ja)](README.ja.md) | [한국어 (ko)](README.ko.md)
+
 ## Overview
 
 `document-validator` is a document conformance agent. Given **Criteria Documents** (what defines the requirements — a regulation, a tender specification, review-committee comments, an internal checklist) and **Pending Documents** (the document(s) being checked against it — an application, a bid, a project plan), it systematically checks whether every requirement in the criteria is addressed in the pending documents.
@@ -61,14 +63,17 @@ Coverage scores:
 | 70–89% | ⚠️ Partial | Present but incomplete or vague |
 | 40–69% | ❌ Weak | Only indirectly related or severely insufficient |
 | 0–39% | 🚫 Missing | No corresponding content found |
+| — | 🔍 Indeterminate | The only available evidence is content that was never actually read (an image, scanned page, technical drawing, or a page that timed out) |
+
+A page being image-based, scanned, or otherwise unreadable is not evidence of what it contains — it's the absence of evidence. The agent never assigns Compliant (or any of the other scored labels) based on content nobody actually read; it scores those items Indeterminate, routes them to the Manual Review queue, and states exactly what a human needs to check (e.g. "p.9 — diagram, not extracted; confirm it shows the required site layout"). A Score and a "flag for manual review" can never disagree — if it's flagged, the score is Indeterminate, not a confident-looking percentage.
 
 ### Phase 3 — Report Generation
 The agent produces a structured report in the language the user is communicating in (not necessarily the language of the input documents being analyzed), containing:
 
 - **Executive summary** — overall compliance rate and disposition recommendation
 - **Detailed results table** — one row per requirement, with score, source reference, and notes
-- **Gap details** — for all items below 90%, consolidated by root cause with correction suggestions
-- **Manual review queue** — items that require human judgment before a verdict can be issued
+- **Gap details** — for every item below 90% plus every Indeterminate item, consolidated by root cause with correction suggestions
+- **Manual review queue** — items that require human judgment before a verdict can be issued, including any item only supported by content nobody actually read
 
 Disposition options: *Approve* / *Request correction* / *Return filing* / *Escalate for review*
 
