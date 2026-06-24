@@ -39,3 +39,63 @@ def test_running_with_stale_heartbeat_resumes():
 
 def test_queued_with_stale_heartbeat_resumes():
     assert decide_recall_action(_job("queued", hb=NOW - 999), NOW, STALE) == "resume"
+
+
+from agent.recall import build_recall_callback
+
+
+class _FakeSession:
+    id = "sess-1"
+
+
+class _FakeCtx:
+    user_id = "user-1"
+    session = _FakeSession()
+
+
+class _FakeStore:
+    def __init__(self, job):
+        self._job = job
+        self.delivered = False
+        self.resumed = False
+
+    def read_job(self, u, s, j, bucket=None):
+        return self._job
+
+    def latest_undelivered_done_for_user(self, u, bucket=None):
+        return None
+
+    def find_active_job(self, u, s):
+        return self._job
+
+    def mark_delivered(self, u, s, j, bucket=None):
+        self.delivered = True
+        return True
+
+
+def test_callback_delivers_checklist_content_once():
+    store = _FakeStore({"job_id": "j1", "status": "done", "delivered": False, "result": "| ID | ... |"})
+    cb = build_recall_callback(store, start_async_validation=lambda *a, **k: "j1", stale_after=180)
+    content = cb(_FakeCtx())
+    assert content is not None
+    assert "| ID | ... |" in content.parts[0].text
+    assert store.delivered is True
+
+
+def test_callback_returns_none_when_no_job():
+    store = _FakeStore(None)
+    cb = build_recall_callback(store, start_async_validation=lambda *a, **k: "j1", stale_after=180)
+    assert cb(_FakeCtx()) is None
+
+
+def test_callback_resumes_stale_job():
+    store = _FakeStore({"job_id": "j1", "status": "running", "delivered": False, "heartbeat_epoch": 0})
+    resumed = {}
+    cb = build_recall_callback(
+        store,
+        start_async_validation=lambda *a, **k: resumed.setdefault("id", k.get("resume_job_id")),
+        stale_after=180,
+    )
+    content = cb(_FakeCtx())
+    assert content is not None  # status message to the user
+    assert resumed["id"] == "j1"

@@ -130,3 +130,18 @@ def read_extract(user_id, session_id, job_id, bucket=None):
     bucket = bucket or _default_bucket()
     blob = bucket.blob(_extract_path(user_id, session_id, job_id))
     return blob.download_as_text() if blob.exists() else ""
+
+
+def find_active_job(user_id, session_id, bucket=None):
+    bucket = bucket or _default_bucket()
+    blob = bucket.blob(_index_path(user_id))
+    if not blob.exists():
+        return None
+    entries = sorted(json.loads(blob.download_as_text()), key=lambda e: e.get("epoch", 0), reverse=True)
+    for e in entries:
+        if e.get("session_id") != session_id:
+            continue
+        rec = read_job(user_id, session_id, e["job_id"], bucket=bucket)
+        if rec and not rec.get("delivered"):
+            return rec
+    return None
