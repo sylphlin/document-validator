@@ -9,11 +9,13 @@ surfaced by the recall callback on the user's next message.
 """
 
 import argparse
+import hashlib
 import importlib.util
 import os
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from pathlib import Path
 
@@ -49,7 +51,7 @@ def _fetch_to_local(ref):
     """Fetch a Drive ref (or pass through a local path) to a local PDF path."""
     if os.path.exists(ref):
         return ref
-    out = str(Path(tempfile.gettempdir()) / f"criteria_{abs(hash(ref))}.pdf")
+    out = str(Path(tempfile.gettempdir()) / f"criteria_{hashlib.sha1(ref.encode('utf-8')).hexdigest()[:12]}.pdf")
     subprocess.run(
         [sys.executable, str(SCRIPTS_DIR / "fetch_drive_file.py"), ref, "--out", out],
         check=True,
@@ -110,6 +112,25 @@ def _build_checklist(extracted_md, rules):
     return resp.text
 
 
+def _start_heartbeat(user_id, session_id, job_id, interval=30):
+    """Touch heartbeat_epoch on a timer so a long extract/checklist call (which
+    emits no chunk-boundary heartbeat) isn't mistaken for a dead job by the
+    recall callback — which would otherwise launch a duplicate worker. Worst
+    case this reverts progress by one chunk, which is already idempotent.
+    """
+    stop = threading.Event()
+
+    def _beat():
+        while not stop.wait(interval):
+            try:
+                job_store.touch(user_id, session_id, job_id)
+            except Exception:
+                pass
+
+    threading.Thread(target=_beat, daemon=True).start()
+    return stop
+
+
 def run(job_id, session_id, user_id, criteria_refs):
     """Resume-aware: continues from the job record's progress {file_index, next_start}.
 
@@ -128,33 +149,46 @@ def run(job_id, session_id, user_id, criteria_refs):
     else:
         criteria_refs = rec.get("criteria_refs", [])
     rec.setdefault("delivered", False)
+    # Persist session_id/user_id in the record so the cross-session recall
+    # fallback (latest_undelivered_done_for_user) can mark the right blob
+    # delivered even when the frontend hands the agent a new session_id.
+    rec["session_id"] = session_id
+    rec["user_id"] = user_id
     job_store.write_job(user_id, session_id, rec)
     progress = rec.get("progress") or {"file_index": 0, "next_start": 1}
-    job_store.touch(user_id, session_id, job_id, status="running", progress={**progress, "stage": "extract"})
 
-    for fi in range(progress.get("file_index", 0), len(criteria_refs)):
-        local = _fetch_to_local(criteria_refs[fi])
-        total = _pdf_page_count(local)
-        start_at = progress["next_start"] if fi == progress.get("file_index", 0) else 1
-        for (s, e) in chunk_ranges(start_at, total, CHUNK_PAGES):
-            out = str(Path(tempfile.gettempdir()) / f"{job_id}_{fi}_{s}.md")
-            text = _extract_range(local, s, e, out)
-            job_store.append_extract(user_id, session_id, job_id, text)
+    heartbeat_stop = _start_heartbeat(user_id, session_id, job_id)
+    try:
+        job_store.touch(user_id, session_id, job_id, status="running", progress={**progress, "stage": "extract"})
+
+        for fi in range(progress.get("file_index", 0), len(criteria_refs)):
+            local = _fetch_to_local(criteria_refs[fi])
+            total = _pdf_page_count(local)
+            start_at = progress["next_start"] if fi == progress.get("file_index", 0) else 1
+            for (s, e) in chunk_ranges(start_at, total, CHUNK_PAGES):
+                out = str(Path(tempfile.gettempdir()) / f"{job_id}_{fi}_{s}.md")
+                text = _extract_range(local, s, e, out)
+                job_store.append_extract(user_id, session_id, job_id, text)
+                job_store.touch(
+                    user_id, session_id, job_id, status="running",
+                    progress={"file_index": fi, "next_start": e + 1, "stage": "extract", "total_pages": total},
+                )
             job_store.touch(
                 user_id, session_id, job_id, status="running",
-                progress={"file_index": fi, "next_start": e + 1, "stage": "extract", "total_pages": total},
+                progress={"file_index": fi + 1, "next_start": 1, "stage": "extract"},
             )
-        job_store.touch(
-            user_id, session_id, job_id, status="running",
-            progress={"file_index": fi + 1, "next_start": 1, "stage": "extract"},
-        )
 
-    job_store.touch(user_id, session_id, job_id, status="running", progress={"stage": "checklist"})
-    checklist = _build_checklist(job_store.read_extract(user_id, session_id, job_id), rules)
+        job_store.touch(user_id, session_id, job_id, status="running", progress={"stage": "checklist"})
+        checklist = _build_checklist(job_store.read_extract(user_id, session_id, job_id), rules)
 
-    rec = job_store.read_job(user_id, session_id, job_id) or {"job_id": job_id}
-    rec.update({"job_id": job_id, "status": "done", "delivered": False, "result": checklist, "heartbeat_epoch": time.time()})
-    job_store.write_job(user_id, session_id, rec)
+        rec = job_store.read_job(user_id, session_id, job_id) or {"job_id": job_id}
+        rec.update({
+            "job_id": job_id, "session_id": session_id, "user_id": user_id,
+            "status": "done", "delivered": False, "result": checklist, "heartbeat_epoch": time.time(),
+        })
+        job_store.write_job(user_id, session_id, rec)
+    finally:
+        heartbeat_stop.set()
 
 
 def main():
@@ -168,7 +202,10 @@ def main():
         run(args.job_id, args.session_id, args.user_id, args.criteria)
     except Exception as e:  # noqa: BLE001 — record any failure for the recall callback
         rec = job_store.read_job(args.user_id, args.session_id, args.job_id) or {"job_id": args.job_id}
-        rec.update({"job_id": args.job_id, "status": "failed", "delivered": False, "error": str(e), "heartbeat_epoch": time.time()})
+        rec.update({
+            "job_id": args.job_id, "session_id": args.session_id, "user_id": args.user_id,
+            "status": "failed", "delivered": False, "error": str(e), "heartbeat_epoch": time.time(),
+        })
         job_store.write_job(args.user_id, args.session_id, rec)
         sys.exit(1)
 

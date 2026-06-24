@@ -99,3 +99,38 @@ def test_callback_resumes_stale_job():
     content = cb(_FakeCtx())
     assert content is not None  # status message to the user
     assert resumed["id"] == "j1"
+
+
+class _FakeStoreCrossSession:
+    """No active job in the current session; a done job exists under an OLDER
+    session. mark_delivered only succeeds when called with that older session_id
+    — mirroring real GCS, where the blob is keyed by the job's own session.
+    """
+
+    def __init__(self):
+        self._done = {"job_id": "j1", "session_id": "s_old", "status": "done",
+                      "delivered": False, "result": "OLD-CHECKLIST"}
+        self.delivered_with_session = None
+
+    def find_active_job(self, u, s):
+        return None  # nothing under the current (new) session
+
+    def latest_undelivered_done_for_user(self, u, bucket=None):
+        return self._done
+
+    def mark_delivered(self, u, s, j, bucket=None):
+        if s != "s_old":  # wrong session -> blob not found -> CAS fails
+            return False
+        self.delivered_with_session = s
+        return True
+
+
+def test_callback_delivers_cross_session_job_using_record_session_id():
+    # _FakeCtx.session.id is "sess-1" (a different/new session). The fallback
+    # must mark delivered against the job record's own session ("s_old").
+    store = _FakeStoreCrossSession()
+    cb = build_recall_callback(store, start_async_validation=lambda *a, **k: "j1", stale_after=180)
+    content = cb(_FakeCtx())
+    assert content is not None
+    assert "OLD-CHECKLIST" in content.parts[0].text
+    assert store.delivered_with_session == "s_old"

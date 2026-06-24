@@ -73,8 +73,9 @@ def build_recall_callback(job_store, start_async_validation, stale_after=180.0):
                 )
             return None
         if action == FAILED:
-            job_store.mark_delivered(user_id, session_id, job["job_id"])
-            return _content(f"背景處理失敗：{job.get('error', '未知錯誤')}。需要我重試嗎？")
+            if job_store.mark_delivered(user_id, session_id, job["job_id"]):
+                return _content(f"背景處理失敗：{job.get('error', '未知錯誤')}。需要我重試嗎？")
+            return None
         if action == RUNNING:
             p = job.get("progress", {})
             return _content(f"還在背景處理中（{p.get('stage', '處理')}：{p.get('done', '?')}/{p.get('total', '?')}）。")
