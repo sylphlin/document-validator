@@ -8,6 +8,7 @@ from google.genai import types
 from .drive_tool import fetch_drive_file_oauth
 from .skill_loader import load_skill
 from .tools import make_tools
+from .recall import build_recall_callback
 
 load_dotenv()
 
@@ -53,6 +54,13 @@ def build_agent(skill_dir: Path = _DEFAULT_SKILL_DIR) -> LlmAgent:
         tool_lines.append(
             "- check_job: poll a job_id from start_job for its status or result"
         )
+        tools.append(start_async_validation)
+        tool_lines.append(
+            "- start_async_validation: kick off background criteria extraction + "
+            "checklist build for large PDFs; returns a job_id immediately. Do NOT "
+            "poll it — tell the user it's processing and end your turn. The result "
+            "is surfaced automatically when they next message."
+        )
     if has_assets:
         tools.append(read_asset)
         tool_lines.append("- read_asset: read a reference or asset file bundled with this skill")
@@ -93,8 +101,19 @@ def build_agent(skill_dir: Path = _DEFAULT_SKILL_DIR) -> LlmAgent:
             "skill instructions call for persisting or restoring state.\n"
         )
 
+    import importlib.util as _ilu
+
+    _js_path = skill_dir / "scripts" / "job_store.py"
+    recall_callback = None
+    if _js_path.exists():
+        _spec = _ilu.spec_from_file_location("job_store", _js_path)
+        _job_store = _ilu.module_from_spec(_spec)
+        _spec.loader.exec_module(_job_store)
+        recall_callback = build_recall_callback(_job_store, start_async_validation)
+
     return LlmAgent(
         name=agent_name,
+        before_agent_callback=recall_callback,
         # ADK does not retry 429 (RESOURCE_EXHAUSTED) by default — passing a
         # bare model-name string gets a Gemini wrapper with retry_options=None,
         # so a single rate-limit response fails the whole turn instead of
