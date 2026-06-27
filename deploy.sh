@@ -17,8 +17,12 @@ for arg in "$@"; do
   esac
 done
 
-if [ -n "$GE_APP_ID" ]; then
-  GE_APP_ID="${GE_APP_ID%/}"
+# GE_APP_ID is the numeric Gemini Enterprise engine ID — always digits only.
+# Fail fast on anything else rather than building a URL from a malformed ID
+# and discovering the mistake only after the whole deploy has already run.
+if [ -n "$GE_APP_ID" ] && ! [[ "$GE_APP_ID" =~ ^[0-9]+$ ]]; then
+  echo "Error: --ge expects a numeric Gemini Enterprise APP_ID, got: $GE_APP_ID" >&2
+  exit 1
 fi
 
 PROJECT_ID="${POSITIONAL[0]:?Usage: bash deploy.sh <PROJECT_ID> [REGION] [--ge APP_ID]}"
@@ -179,22 +183,9 @@ print(desc.get("en", desc) if isinstance(desc, dict) else desc)
         AGENT_DESC="$AGENT_NAME"
     fi
 
-    if [[ "$GE_APP_ID" == */reasoningEngines/* ]]; then
-        DETECTED_GE_APP=$(.venv/bin/agents-cli publish gemini-enterprise --list --project "$PROJECT_ID" 2>/dev/null | python3 -c "import sys, json; print(json.load(sys.stdin).get('apps', [{}])[0].get('name', ''))" 2>/dev/null || true)
-        if [ -n "$DETECTED_GE_APP" ]; then
-            GE_APP_ID="$DETECTED_GE_APP"
-        fi
-    fi
-
-    if [[ "$GE_APP_ID" == projects/* ]]; then
-        GE_API_URL="https://discoveryengine.googleapis.com/v1alpha/${GE_APP_ID}/assistants/default_assistant/agents"
-    elif [[ "$GE_APP_ID" == collections/* ]]; then
-        GE_API_URL="https://discoveryengine.googleapis.com/v1alpha/projects/${PROJECT_NUM}/locations/global/${GE_APP_ID}/assistants/default_assistant/agents"
-    elif [[ "$GE_APP_ID" == engines/* ]]; then
-        GE_API_URL="https://discoveryengine.googleapis.com/v1alpha/projects/${PROJECT_NUM}/locations/global/collections/default_collection/${GE_APP_ID}/assistants/default_assistant/agents"
-    else
-        GE_API_URL="https://discoveryengine.googleapis.com/v1alpha/projects/${PROJECT_NUM}/locations/global/collections/default_collection/engines/${GE_APP_ID}/assistants/default_assistant/agents"
-    fi
+    # GE_APP_ID is validated numeric-only above, so it's always a bare engine
+    # ID — no need to detect or branch on path-prefixed forms.
+    GE_API_URL="https://discoveryengine.googleapis.com/v1alpha/projects/${PROJECT_NUM}/locations/global/collections/default_collection/engines/${GE_APP_ID}/assistants/default_assistant/agents"
 
     REGISTER_RESPONSE=$(curl -s -X POST \
       "$GE_API_URL" \
