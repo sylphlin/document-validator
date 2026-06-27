@@ -38,7 +38,7 @@ def test_build_agent_includes_job_tools_when_scripts_present(tmp_path):
     skill_dir = _make_skill(tmp_path)
     (skill_dir / "scripts" / "demo.py").write_text("print('hi')\n", encoding="utf-8")
     agent = build_agent(skill_dir=skill_dir)
-    assert len(agent.tools) == 2
+    assert len(agent.tools) == 3
     assert "start_job" in agent.instruction(None)
     assert "check_job" in agent.instruction(None)
     assert "read_asset" not in agent.instruction(None)
@@ -98,3 +98,13 @@ def test_build_agent_includes_oauth_drive_tool_when_configured(tmp_path, monkeyp
     agent = build_agent(skill_dir=skill_dir)
     assert any(getattr(t, "__name__", "") == "fetch_drive_file_oauth" for t in agent.tools)
     assert "fetch_drive_file_oauth" in agent.instruction(None)
+
+
+def test_async_validation_tool_registered_when_scripts_present(tmp_path):
+    skill_dir = _make_skill(tmp_path)
+    (skill_dir / "scripts" / "run_async_validation.py").write_text("print('x')\n", encoding="utf-8")
+    # build_agent wires the recall callback only when job_store.py is present.
+    (skill_dir / "scripts" / "job_store.py").write_text("def find_active_job(*a, **k):\n    return None\n", encoding="utf-8")
+    agent = build_agent(skill_dir=skill_dir)
+    assert any(getattr(t, "__name__", "") == "start_async_validation" for t in agent.tools)
+    assert agent.before_agent_callback is not None

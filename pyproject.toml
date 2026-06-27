@@ -4,11 +4,13 @@ version = "0.1.0"
 requires-python = ">=3.11"
 dependencies = [
     "google-adk[gcp]>=2.0.0",
+    "google-genai>=2.4.0",
     "pyyaml>=6.0",
     "python-dotenv>=1.0",
     "google-auth>=2.0.0",
     "google-cloud-storage>=2.0.0",
     "pdfplumber>=0.11.0",
+    "pypdfium2>=4.30.0",
 ]
 
 [project.optional-dependencies]

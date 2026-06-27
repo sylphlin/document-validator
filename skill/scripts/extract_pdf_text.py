@@ -15,9 +15,24 @@ Per page:
     to check the original PDF for figures, photos, or scanned attachments.
   - Pages with little or no extractable content (no real text, no tables) are
     flagged as likely scanned/image-based.
-  - Pages dense with vector graphics (CAD drawings, 3D renderings) skip table
-    detection entirely and are flagged as drawings needing visual review —
-    see PDF_DRAWING_PAGE_VECTOR_THRESHOLD below.
+  - Pages dense with vector graphics (CAD drawings, 3D renderings) are
+    classified via pdfium (see PDF_DRAWING_PAGE_VECTOR_THRESHOLD below) and
+    routed to a separate fast path instead of pdfplumber/pdfminer — see
+    "Drawing pages" below.
+
+Drawing pages (CAD/architectural exports with huge vector counts) are handled
+by pdfium (the pypdfium2 package — already an existing transitive dependency
+of pdfplumber, used here directly) instead of pdfplumber. pdfplumber's table
+detection is built on pdfminer, a pure-Python content-stream parser whose cost
+scales with the *total* number of objects on a page — for a CAD export with
+hundreds of thousands of vector primitives, merely reading page.lines/
+.curves/.rects (the property access used to classify the page) can take over a
+minute, before any actual extraction happens. pdfium is a compiled engine
+(the same one Chrome uses to render PDFs) and classifies + extracts text from
+the same pages in milliseconds to low seconds — see the threshold check below.
+pdfium has no table-structure detection of its own, so non-drawing pages still
+go through pdfplumber unchanged; only pages that fail the drawing-page check
+skip it entirely.
 
 Pages within a chunk are processed in parallel across worker processes (table
 detection is the slow part of pdfplumber and is pure-Python/CPU-bound, so
@@ -56,6 +71,7 @@ import sys
 import time
 
 import pdfplumber
+import pypdfium2 as pdfium
 
 
 def log_progress(message):
@@ -83,7 +99,7 @@ class _PageTimeoutError(Exception):
     pass
 
 
-def _extract_page_markdown_with_timeout(page, page_num):
+def _extract_page_markdown_with_timeout(page, page_num, pdfium_page=None):
     """Wraps extract_page_markdown with a per-page wall-clock cap.
 
     Uses SIGALRM rather than a thread/process, since this already runs as the
@@ -100,9 +116,15 @@ def _extract_page_markdown_with_timeout(page, page_num):
     A flag set by the handler (checked regardless of the final exception
     type/wrapping) is what actually identifies a timeout; only when that flag
     is unset does a caught exception get re-raised as a real error.
+
+    This cap is now mostly a safety net rather than the primary defense for
+    drawing pages — pdfium_page (when provided) lets extract_page_markdown
+    classify and, if needed, fully extract a CAD-heavy page in milliseconds to
+    low seconds, well before this would ever fire. It still matters for pages
+    that are slow for some other reason pdfium's check doesn't catch.
     """
     if PAGE_TIMEOUT_SECONDS <= 0:
-        return extract_page_markdown(page)
+        return extract_page_markdown(page, pdfium_page)
 
     timed_out = {"value": False}
 
@@ -113,7 +135,7 @@ def _extract_page_markdown_with_timeout(page, page_num):
     previous_handler = signal.signal(signal.SIGALRM, alarm_handler)
     signal.alarm(PAGE_TIMEOUT_SECONDS)
     try:
-        return extract_page_markdown(page)
+        return extract_page_markdown(page, pdfium_page)
     except Exception:
         if not timed_out["value"]:
             raise
@@ -140,21 +162,52 @@ TABLE_SETTINGS = {}
 # find_tables()'s ruling-line detection groups every line/curve/rect on the
 # page looking for grid structure, and its cost scales with how many of those
 # objects exist — a CAD drawing or 3D architectural rendering can have
-# thousands of short vector segments (fine detail, dimension marks, hatching)
-# that aren't a table at all, and running table detection on them can take
-# minutes for a page with nothing to find. A page this dense with vector
-# graphics is treated as a drawing/diagram and skips table detection entirely
-# rather than running it and hoping it finishes in time.
+# thousands (sometimes hundreds of thousands) of short vector segments (fine
+# detail, dimension marks, hatching) that aren't a table at all, and running
+# table detection on them can take minutes for a page with nothing to find.
+# A page this dense with vector graphics is treated as a drawing/diagram and
+# routed to _is_drawing_page/pdfium (below) instead of pdfplumber entirely.
 DRAWING_PAGE_VECTOR_THRESHOLD = int(os.getenv("PDF_DRAWING_PAGE_VECTOR_THRESHOLD", "800"))
+
+# FPDF_PAGEOBJ_PATH — the pdfium page-object type for vector path segments
+# (lines, curves, rects). Re-exposed as a module constant so tests can fake
+# objects with a matching `.type` without importing pdfium's raw bindings.
+PDFIUM_PATH_OBJECT_TYPE = pdfium.raw.FPDF_PAGEOBJ_PATH
+
+
+def _is_drawing_page(pdfium_page, threshold):
+    """Cheap drawing-page classification via pdfium instead of pdfplumber.
+
+    pdfplumber's page.lines/.curves/.rects force pdfminer (pure Python) to
+    fully tokenize the page's entire content stream just to answer "how many
+    vector objects are there" — for a page with hundreds of thousands of
+    them, that alone can take over a minute, before the threshold check even
+    gets to make its decision. pdfium is a compiled engine and iterating its
+    page objects is fast enough that, combined with an early exit the moment
+    `threshold` is passed, classifying even a pathological page costs
+    milliseconds: we don't need the exact count, just whether it's over the
+    line, so there's no reason to keep counting past it.
+    """
+    count = 0
+    for obj in pdfium_page.get_objects():
+        if obj.type == PDFIUM_PATH_OBJECT_TYPE:
+            count += 1
+            if count > threshold:
+                return True, count
+    return False, count
+
 
 # One pdfplumber.PDF handle per worker process, opened once via _init_worker
 # rather than once per page — reused across every page that worker handles.
+# A pdfium.PdfDocument is opened alongside it for the fast drawing-page path.
 _worker_pdf = None
+_worker_pdfium = None
 
 
 def _init_worker(pdf_path):
-    global _worker_pdf
+    global _worker_pdf, _worker_pdfium
     _worker_pdf = pdfplumber.open(pdf_path)
+    _worker_pdfium = pdfium.PdfDocument(pdf_path)
 
 
 def rows_to_markdown(rows):
@@ -179,7 +232,40 @@ def rows_to_markdown(rows):
     return "\n".join(lines)
 
 
-def extract_page_markdown(page):
+def extract_page_markdown(page, pdfium_page=None):
+    # pdfium's check below is the primary gate — cheap enough to run on every
+    # page. The pdfplumber-based check further down still runs for whatever
+    # pdfium didn't flag: it's a no-op cost-wise on genuinely normal pages
+    # (their vector count is low by definition), and a safety net for the
+    # rare page where the two engines' object counts disagree near the
+    # threshold, or where pdfium_page wasn't available at all (e.g. tests
+    # exercising the pdfplumber-only path directly).
+    if pdfium_page is not None:
+        is_drawing, vector_object_count = _is_drawing_page(pdfium_page, DRAWING_PAGE_VECTOR_THRESHOLD)
+        if is_drawing:
+            # pdfium's text extraction is a separate code path from its path-object
+            # iteration above — it only reads text-showing operators, never the
+            # vector/path data, so paragraph text on an otherwise CAD-heavy page
+            # (titles, notes, labels) is recovered instead of thrown away with it.
+            text = (pdfium_page.get_textpage().get_text_range() or "").strip()
+            parts = []
+            if text:
+                parts.append(text)
+            parts.append(
+                f"*[Page appears to be a technical drawing/diagram (>{DRAWING_PAGE_VECTOR_THRESHOLD} "
+                "vector graphic objects detected) — drawing content not extracted, but any text on "
+                "the page is included above. Visual review still needed to confirm what the drawing "
+                "shows; do not assume it satisfies a requirement without checking.]*"
+            )
+            # likely_scanned means "no usable text was recovered" — that's
+            # independent of whether this is a drawing page. A drawing page
+            # with a real paragraph of text (titles, notes, captions) is not
+            # scanned/blank; only flag it that way using the same threshold
+            # as every other page, so the Phase 0 intake summary doesn't tell
+            # the agent "no extractable content" when there plainly is some.
+            likely_scanned = len(text) < SCANNED_PAGE_CONTENT_THRESHOLD
+            return "\n\n".join(parts), likely_scanned, 0
+
     vector_object_count = len(page.lines) + len(page.curves) + len(page.rects)
     if vector_object_count > DRAWING_PAGE_VECTOR_THRESHOLD:
         text = (page.extract_text() or "").strip()
@@ -230,24 +316,32 @@ def _process_page(page_num):
     log_progress(f"pid {os.getpid()}: starting page {page_num}")
     started = time.time()
     page = _worker_pdf.pages[page_num - 1]
-    md, likely_scanned, n_tables = _extract_page_markdown_with_timeout(page, page_num)
+    pdfium_page = _worker_pdfium[page_num - 1]
+    try:
+        md, likely_scanned, n_tables = _extract_page_markdown_with_timeout(page, page_num, pdfium_page)
+    finally:
+        pdfium_page.close()
     log_progress(f"pid {os.getpid()}: finished page {page_num} ({time.time() - started:.1f}s)")
     return page_num, md, likely_scanned, n_tables
 
 
-def _extract_with_log(pdf, page_num):
+def _extract_with_log(pdf, pdfium_pdf, page_num):
     log_progress(f"starting page {page_num}")
     started = time.time()
-    result = _extract_page_markdown_with_timeout(pdf.pages[page_num - 1], page_num)
+    pdfium_page = pdfium_pdf[page_num - 1]
+    try:
+        result = _extract_page_markdown_with_timeout(pdf.pages[page_num - 1], page_num, pdfium_page)
+    finally:
+        pdfium_page.close()
     log_progress(f"finished page {page_num} ({time.time() - started:.1f}s)")
     return result
 
 
 def process_pages_sequentially(pdf_path, page_numbers):
     log_progress(f"processing {len(page_numbers)} page(s) sequentially: {page_numbers[0]}-{page_numbers[-1]}")
-    with pdfplumber.open(pdf_path) as pdf:
+    with pdfplumber.open(pdf_path) as pdf, pdfium.PdfDocument(pdf_path) as pdfium_pdf:
         return {
-            p: _extract_with_log(pdf, p)
+            p: _extract_with_log(pdf, pdfium_pdf, p)
             for p in page_numbers
         }
 
