@@ -59,7 +59,9 @@ def build_agent(skill_dir: Path = _DEFAULT_SKILL_DIR) -> LlmAgent:
             "- start_async_validation: kick off background criteria extraction + "
             "checklist build for large PDFs; returns a job_id immediately. Do NOT "
             "poll it — tell the user it's processing and end your turn. The result "
-            "is surfaced automatically when they next message."
+            "is surfaced automatically when they next message. Always pass "
+            "response_language describing the language you're currently responding "
+            "in — the background job has no other way to know it."
         )
     if has_assets:
         tools.append(read_asset)

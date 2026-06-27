@@ -60,7 +60,7 @@ def _stub_pipeline(mod, monkeypatch, bucket):
     monkeypatch.setattr(mod.job_store, "_default_bucket", lambda: bucket)
     monkeypatch.setattr(mod, "_pdf_page_count", lambda p: 5)
     monkeypatch.setattr(mod, "_extract_range", lambda p, s, e, o: f"pages {s}-{e}\n")
-    monkeypatch.setattr(mod, "_build_checklist", lambda md, rules: "CHECKLIST")
+    monkeypatch.setattr(mod, "_build_checklist", lambda md, rules, language="": "CHECKLIST")
 
 
 def test_run_persists_session_id_and_marks_done(monkeypatch):
@@ -99,3 +99,88 @@ def test_run_recovers_criteria_refs_on_resume_with_empty_list(monkeypatch):
 
     assert fetched == ["refA"]
     assert mod.job_store.read_job("user-1", "sess-A", "job1", bucket=bucket)["status"] == "done"
+
+
+def test_run_persists_response_language(monkeypatch):
+    mod = _load()
+    bucket = _FakeBucket()
+    _stub_pipeline(mod, monkeypatch, bucket)
+    monkeypatch.setattr(mod, "_fetch_to_local", lambda ref: "/tmp/x.pdf")
+
+    mod.run("job1", "sess-A", "user-1", ["refA"], response_language="en")
+
+    rec = mod.job_store.read_job("user-1", "sess-A", "job1", bucket=bucket)
+    assert rec["response_language"] == "en"
+
+
+def test_run_recovers_response_language_on_resume(monkeypatch):
+    mod = _load()
+    bucket = _FakeBucket()
+    _stub_pipeline(mod, monkeypatch, bucket)
+    monkeypatch.setattr(mod, "_fetch_to_local", lambda ref: "/tmp/x.pdf")
+
+    mod.job_store.write_job("user-1", "sess-A", {
+        "job_id": "job1", "session_id": "sess-A", "user_id": "user-1",
+        "status": "running", "delivered": False, "criteria_refs": ["refA"],
+        "response_language": "ja", "progress": {"file_index": 0, "next_start": 1},
+    }, bucket=bucket)
+
+    # Resume call (as the recall callback does) passes no response_language;
+    # run() must recover it from the record rather than losing it.
+    seen = {}
+    monkeypatch.setattr(
+        mod, "_build_checklist",
+        lambda md, rules, language="": seen.setdefault("language", language) or "CHECKLIST",
+    )
+    mod.run("job1", "sess-A", "user-1", [])
+
+    assert seen["language"] == "ja"
+
+
+def test_build_checklist_prompt_directs_language(monkeypatch):
+    mod = _load()
+    monkeypatch.setenv("GOOGLE_CLOUD_PROJECT", "proj")
+    captured = {}
+
+    class _FakeModels:
+        def generate_content(self, model, contents):
+            captured["prompt"] = contents
+
+            class _Resp:
+                text = "CHECKLIST"
+            return _Resp()
+
+    class _FakeClient:
+        def __init__(self, **kwargs):
+            self.models = _FakeModels()
+
+    monkeypatch.setattr("google.genai.Client", _FakeClient)
+
+    result = mod._build_checklist("EXTRACTED", "RULES", response_language="Spanish")
+
+    assert result == "CHECKLIST"
+    assert "Spanish" in captured["prompt"]  # passed straight through, no fixed-language lookup
+
+
+def test_build_checklist_prompt_defaults_when_language_unspecified(monkeypatch):
+    mod = _load()
+    monkeypatch.setenv("GOOGLE_CLOUD_PROJECT", "proj")
+    captured = {}
+
+    class _FakeModels:
+        def generate_content(self, model, contents):
+            captured["prompt"] = contents
+
+            class _Resp:
+                text = "CHECKLIST"
+            return _Resp()
+
+    class _FakeClient:
+        def __init__(self, **kwargs):
+            self.models = _FakeModels()
+
+    monkeypatch.setattr("google.genai.Client", _FakeClient)
+
+    mod._build_checklist("EXTRACTED", "RULES")
+
+    assert "zh-TW" in captured["prompt"]

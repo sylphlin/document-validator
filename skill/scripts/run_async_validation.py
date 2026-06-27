@@ -92,7 +92,7 @@ def _extract_range(pdf_path, start, end, out_path):
     return Path(out_path).read_text(encoding="utf-8")
 
 
-def _build_checklist(extracted_md, rules):
+def _build_checklist(extracted_md, rules, response_language=""):
     from google import genai
 
     client = genai.Client(
@@ -100,10 +100,17 @@ def _build_checklist(extracted_md, rules):
         project=os.environ["GOOGLE_CLOUD_PROJECT"],
         location=os.environ.get("GOOGLE_CLOUD_LOCATION", "global"),
     )
+    # response_language is free text describing whatever language the agent was
+    # responding in when it kicked this job off (no fixed list) — the
+    # background pipeline has no conversation context of its own, so without
+    # this it has no signal for what language to write in.
+    language_name = response_language or "Traditional Chinese (zh-TW) — unspecified, default per SKILL.md"
     prompt = (
         "Follow these rules to build the Criteria Checklist as a Markdown table.\n\n"
         f"=== RULES (from SKILL.md Phase 1) ===\n{rules}\n\n"
         f"=== EXTRACTED CRITERIA TEXT ===\n{extracted_md}\n\n"
+        f"Write the checklist (headers, labels, and any notes) in {language_name}, "
+        "regardless of what language the extracted criteria text above is in.\n"
         "Output only the checklist table and any per-row notes the rules require."
     )
     resp = client.models.generate_content(
@@ -131,7 +138,7 @@ def _start_heartbeat(user_id, session_id, job_id, interval=30):
     return stop
 
 
-def run(job_id, session_id, user_id, criteria_refs):
+def run(job_id, session_id, user_id, criteria_refs, response_language=""):
     """Resume-aware: continues from the job record's progress {file_index, next_start}.
 
     Each chunk is appended to the durable accumulator BEFORE progress advances,
@@ -148,6 +155,12 @@ def run(job_id, session_id, user_id, criteria_refs):
         rec["criteria_refs"] = criteria_refs
     else:
         criteria_refs = rec.get("criteria_refs", [])
+    # Same recovery pattern for response_language: the resume call (recall
+    # callback) doesn't know it, so fall back to whatever the first run persisted.
+    if response_language:
+        rec["response_language"] = response_language
+    else:
+        response_language = rec.get("response_language", "")
     rec.setdefault("delivered", False)
     # Persist session_id/user_id in the record so the cross-session recall
     # fallback (latest_undelivered_done_for_user) can mark the right blob
@@ -179,7 +192,9 @@ def run(job_id, session_id, user_id, criteria_refs):
             )
 
         job_store.touch(user_id, session_id, job_id, status="running", progress={"stage": "checklist"})
-        checklist = _build_checklist(job_store.read_extract(user_id, session_id, job_id), rules)
+        checklist = _build_checklist(
+            job_store.read_extract(user_id, session_id, job_id), rules, response_language
+        )
 
         rec = job_store.read_job(user_id, session_id, job_id) or {"job_id": job_id}
         rec.update({
@@ -197,9 +212,10 @@ def main():
     parser.add_argument("--session-id", required=True)
     parser.add_argument("--user-id", required=True)
     parser.add_argument("--criteria", action="append", default=[])
+    parser.add_argument("--response-language", default="")
     args = parser.parse_args()
     try:
-        run(args.job_id, args.session_id, args.user_id, args.criteria)
+        run(args.job_id, args.session_id, args.user_id, args.criteria, args.response_language)
     except Exception as e:  # noqa: BLE001 — record any failure for the recall callback
         rec = job_store.read_job(args.user_id, args.session_id, args.job_id) or {"job_id": args.job_id}
         rec.update({

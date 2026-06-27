@@ -48,9 +48,24 @@ class _FakeSession:
     id = "sess-1"
 
 
+class _FakePart:
+    def __init__(self, text):
+        self.text = text
+
+
+class _FakeContent:
+    def __init__(self, text):
+        self.parts = [_FakePart(text)]
+
+
 class _FakeCtx:
     user_id = "user-1"
     session = _FakeSession()
+    user_content = None  # no input text by default — falls back to job's stored language
+
+    def __init__(self, user_text=None):
+        if user_text is not None:
+            self.user_content = _FakeContent(user_text)
 
 
 class _FakeStore:
@@ -123,6 +138,61 @@ class _FakeStoreCrossSession:
             return False
         self.delivered_with_session = s
         return True
+
+
+def test_callback_delivers_in_english_when_job_response_language_is_en():
+    store = _FakeStore({
+        "job_id": "j1", "status": "done", "delivered": False,
+        "result": "| ID | ... |", "response_language": "en",
+    })
+    cb = build_recall_callback(store, start_async_validation=lambda *a, **k: "j1", stale_after=180)
+    content = cb(_FakeCtx())
+    assert "Criteria Checklist" in content.parts[0].text
+    assert "查核清單" not in content.parts[0].text
+
+
+def test_callback_delivers_in_chinese_when_response_language_missing():
+    store = _FakeStore({"job_id": "j1", "status": "done", "delivered": False, "result": "X"})
+    cb = build_recall_callback(store, start_async_validation=lambda *a, **k: "j1", stale_after=180)
+    content = cb(_FakeCtx())
+    assert "查核清單" in content.parts[0].text
+
+
+def test_callback_uses_current_message_language_over_stale_job_language():
+    # The job was kicked off in an earlier (English) conversation, but the
+    # CURRENT message that triggered this turn is in Traditional Chinese —
+    # that should win, not the stale job language. Reproduces the "first
+    # message of a new conversation comes back in English" report.
+    store = _FakeStore({
+        "job_id": "j1", "status": "done", "delivered": False,
+        "result": "X", "response_language": "en",
+    })
+    cb = build_recall_callback(store, start_async_validation=lambda *a, **k: "j1", stale_after=180)
+    content = cb(_FakeCtx(user_text="請幫我查核這份文件"))
+    assert "查核清單" in content.parts[0].text
+    assert "Criteria Checklist" not in content.parts[0].text
+
+
+def test_callback_falls_back_to_job_language_when_current_message_has_no_text():
+    store = _FakeStore({
+        "job_id": "j1", "status": "done", "delivered": False,
+        "result": "X", "response_language": "en",
+    })
+    cb = build_recall_callback(store, start_async_validation=lambda *a, **k: "j1", stale_after=180)
+    content = cb(_FakeCtx())  # no user_content at all
+    assert "Criteria Checklist" in content.parts[0].text
+
+
+def test_callback_resume_forwards_detected_language_to_relaunch():
+    store = _FakeStore({"job_id": "j1", "status": "running", "delivered": False, "heartbeat_epoch": 0})
+    resumed = {}
+    cb = build_recall_callback(
+        store,
+        start_async_validation=lambda *a, **k: resumed.update(k),
+        stale_after=180,
+    )
+    cb(_FakeCtx(user_text="日本語でお願いします"))
+    assert resumed.get("response_language") == "ja"
 
 
 def test_callback_delivers_cross_session_job_using_record_session_id():

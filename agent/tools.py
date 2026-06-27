@@ -174,7 +174,13 @@ def make_tools(skill_dir: Path, timeout: int = 60):
 
         return asset_path.read_text(encoding="utf-8")
 
-    def start_async_validation(criteria_refs: list[str], session_id: str, user_id: str, resume_job_id: str = "") -> str:
+    def start_async_validation(
+        criteria_refs: list[str],
+        session_id: str,
+        user_id: str,
+        resume_job_id: str = "",
+        response_language: str = "",
+    ) -> str:
         """Launch background criteria extraction + checklist build, return a job_id now.
 
         Unlike start_job, this is fully detached and NOT bounded by the script
@@ -182,6 +188,12 @@ def make_tools(skill_dir: Path, timeout: int = 60):
         surfaced automatically on the user's next message. On resume, pass the
         existing resume_job_id so the background job continues from its GCS
         checkpoint instead of starting over.
+
+        Pass response_language as whatever language you are currently
+        responding to the user in (e.g. "Traditional Chinese", "Spanish") — no
+        fixed list, just describe it. The background checklist-build call has
+        no access to the conversation, so without this it cannot know what
+        language to write the checklist in.
         """
         job_id = resume_job_id or uuid.uuid4().hex[:12]
         script_path = (scripts_dir / "run_async_validation.py").resolve()
@@ -194,6 +206,8 @@ def make_tools(skill_dir: Path, timeout: int = 60):
             "--session-id", session_id,
             "--user-id", user_id,
         ]
+        if response_language:
+            cmd += ["--response-language", response_language]
         for ref in criteria_refs:
             cmd += ["--criteria", ref]
         subprocess.Popen(

@@ -271,12 +271,16 @@ image-based or scanned" in Execution Guidelines below.
 
 **Large PDFs — kick off in the background.** When a criteria PDF is large
 enough that extracting it inline would be slow, call `start_async_validation`
-with the criteria document reference(s). It returns a job_id immediately and
-runs extraction + Criteria Checklist building in the background. Do NOT poll it
-and do NOT call check_job on it — instead, tell the user the document is being
-processed and that the checklist will appear on their next message, then end
-your turn. When the job finishes, the completed Criteria Checklist is surfaced
-to the user automatically; you do not need to rebuild or re-announce it.
+with the criteria document reference(s) and `response_language` describing the
+language you are currently responding in (per "Response Language" above) — the
+background job runs with no conversation context, so this is the only way it
+knows what language to write the checklist in. It returns a job_id immediately
+and runs extraction + Criteria Checklist building in the background. Do NOT
+poll it and do NOT call check_job on it — instead, tell the user the document
+is being processed and that the checklist will appear on their next message,
+then end your turn. When the job finishes, the completed Criteria Checklist is
+surfaced to the user automatically; you do not need to rebuild or re-announce
+it.
 
 ---
 
