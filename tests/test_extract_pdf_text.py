@@ -63,10 +63,106 @@ def test_non_timeout_exceptions_still_propagate(pdf_module, monkeypatch):
 
 def test_page_finishing_well_within_timeout_is_unaffected(pdf_module, monkeypatch):
     monkeypatch.setattr(pdf_module, "PAGE_TIMEOUT_SECONDS", 30)
-    monkeypatch.setattr(pdf_module, "extract_page_markdown", lambda page: ("ok content", False, 0))
+    monkeypatch.setattr(pdf_module, "extract_page_markdown", lambda page, pdfium_page=None: ("ok content", False, 0))
 
     md, likely_scanned, n_tables = pdf_module._extract_page_markdown_with_timeout(object(), page_num=1)
 
     assert md == "ok content"
+    assert likely_scanned is False
+    assert n_tables == 0
+
+
+class _FakePdfiumObj:
+    def __init__(self, obj_type):
+        self.type = obj_type
+
+
+class _FakePdfiumTextPage:
+    def __init__(self, text):
+        self._text = text
+
+    def get_text_range(self):
+        return self._text
+
+
+class _FakePdfiumPage:
+    def __init__(self, objects, text=""):
+        self._objects = objects
+        self._text = text
+
+    def get_objects(self):
+        return iter(self._objects)
+
+    def get_textpage(self):
+        return _FakePdfiumTextPage(self._text)
+
+
+def test_is_drawing_page_stops_counting_once_past_threshold(pdf_module):
+    # 1000 path objects with threshold 800 — early exit means we never need to
+    # iterate all 1000; the reported count just needs to be > threshold.
+    objects = [_FakePdfiumObj(pdf_module.PDFIUM_PATH_OBJECT_TYPE) for _ in range(1000)]
+    is_drawing, count = pdf_module._is_drawing_page(_FakePdfiumPage(objects), threshold=800)
+    assert is_drawing is True
+    assert count == 801
+
+
+def test_is_drawing_page_false_under_threshold(pdf_module):
+    objects = [_FakePdfiumObj(pdf_module.PDFIUM_PATH_OBJECT_TYPE) for _ in range(5)]
+    is_drawing, count = pdf_module._is_drawing_page(_FakePdfiumPage(objects), threshold=800)
+    assert is_drawing is False
+    assert count == 5
+
+
+def test_is_drawing_page_ignores_non_path_objects(pdf_module):
+    # Text/image objects shouldn't count toward the vector-density threshold.
+    objects = [_FakePdfiumObj(1) for _ in range(2000)]  # type 1 == text, not path
+    is_drawing, count = pdf_module._is_drawing_page(_FakePdfiumPage(objects), threshold=800)
+    assert is_drawing is False
+    assert count == 0
+
+
+def test_extract_page_markdown_uses_pdfium_text_on_drawing_page(pdf_module, monkeypatch):
+    monkeypatch.setattr(pdf_module, "DRAWING_PAGE_VECTOR_THRESHOLD", 800)
+    objects = [_FakePdfiumObj(pdf_module.PDFIUM_PATH_OBJECT_TYPE) for _ in range(900)]
+    pdfium_page = _FakePdfiumPage(objects, text="2-1 基地位置圖\nEBM0205")
+
+    class _UntouchedPdfplumberPage:
+        def __getattr__(self, name):
+            raise AssertionError(f"pdfplumber page.{name} should not be touched on a drawing page")
+
+    md, likely_scanned, n_tables = pdf_module.extract_page_markdown(_UntouchedPdfplumberPage(), pdfium_page)
+
+    assert "2-1 基地位置圖" in md
+    assert "technical drawing" in md
+    assert likely_scanned is True
+    assert n_tables == 0
+
+
+def test_extract_page_markdown_falls_through_to_pdfplumber_when_not_drawing(pdf_module, monkeypatch):
+    monkeypatch.setattr(pdf_module, "DRAWING_PAGE_VECTOR_THRESHOLD", 800)
+    pdfium_page = _FakePdfiumPage([_FakePdfiumObj(pdf_module.PDFIUM_PATH_OBJECT_TYPE) for _ in range(3)])
+    monkeypatch.setattr(
+        pdf_module, "_is_drawing_page",
+        lambda page, threshold: (False, 3) if page is pdfium_page else (True, 9999),
+    )
+
+    class _FakePdfplumberPage:
+        lines = []
+        curves = []
+        rects = []
+        images = []
+
+        def find_tables(self, table_settings=None):
+            return []
+
+        def extract_text(self):
+            return "normal paragraph text"
+
+        def filter(self, fn):
+            return self
+
+    md, likely_scanned, n_tables = pdf_module.extract_page_markdown(_FakePdfplumberPage(), pdfium_page)
+
+    assert md == "normal paragraph text"
     assert likely_scanned is False
     assert n_tables == 0

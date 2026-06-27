@@ -10,6 +10,7 @@ dependencies = [
     "google-auth>=2.0.0",
     "google-cloud-storage>=2.0.0",
     "pdfplumber>=0.11.0",
+    "pypdfium2>=4.30.0",
 ]
 
 [project.optional-dependencies]
