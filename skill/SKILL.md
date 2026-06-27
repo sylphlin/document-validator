@@ -248,12 +248,17 @@ instead of retrying again.
 A single slow page (large/complex image) is capped individually by
 `PDF_PAGE_TIMEOUT_SECONDS` (default 30s) and marked
 `*[Page processing timed out...]*` rather than stalling the whole chunk. Pages
-dense with vector graphics (CAD/3D drawings) are detected even faster and marked
-`*[Page appears to be a technical drawing...]*`. **Trust either flag
-immediately — don't re-extract or single-page-probe to verify**, the result
-won't change. If an earlier chunk's table of contents shows where a drawings
-section ends and text resumes, jump straight there instead of probing page by
-page to find the boundary.
+dense with vector graphics (CAD/3D drawings) are detected even faster and
+marked `*[Page appears to be a technical drawing...]*` — but, unlike a timeout,
+this marker usually comes with real extracted text alongside it (titles,
+captions, notes); only the drawing's own visual content was skipped, not the
+page's text. **Trust either flag immediately — don't re-extract or
+single-page-probe to verify**, the result won't change; this is about not
+wasting a turn re-running extraction, not about ignoring text that's already
+sitting right there. See "Execution Guidelines" below for how to use it. If an
+earlier chunk's table of contents shows where a drawings section ends and text
+resumes, jump straight there instead of probing page by page to find the
+boundary.
 
 Pages are extracted in parallel by default (`PDF_EXTRACT_WORKERS`, see
 `.env.example`); each worker holds its own copy of the PDF, so more workers also
@@ -266,8 +271,12 @@ document, not more chunks of this one.)
 Stay in the same turn across chunks as long as each one finishes; only end early
 if a chunk is genuinely still running after a few status updates.
 
-If `--summary-only` flags scanned/image-based pages, follow "Criteria document is
-image-based or scanned" in Execution Guidelines below.
+If `--summary-only` flags pages, follow the matching item in "Execution
+Guidelines" below — "A page's drawing/diagram content was not analyzed" for
+pages marked as a technical drawing, or "A page produced no usable content at
+all" for pages with little or no extractable text. If the whole criteria
+document turns out to be image-based, see "Criteria document is image-based or
+scanned" instead.
 
 **Large PDFs — kick off in the background.** When a criteria PDF is large
 enough that extracting it inline would be slow, call `start_async_validation`
@@ -427,7 +436,7 @@ scoring is your own reasoning with no job to poll.
 | 70–89%  | ⚠️ Partial     | Present but incomplete or vague |
 | 40–69%  | ❌ Weak        | Only indirectly related or severely insufficient |
 | 0–39%   | 🚫 Missing     | No corresponding content found |
-| —       | 🔍 Indeterminate | The only available evidence is content that was never actually read (an image, scanned page, technical drawing, or a page that timed out) |
+| —       | 🔍 Indeterminate | The only available evidence is content that was never actually read — an image, a scanned/blank page, a drawing's own visual content (not the text alongside it), or a page that timed out |
 
 **Never assign Compliant/Partial/Weak/Missing based on content nobody actually
 read.** A page being image-based, scanned, or flagged by
@@ -439,6 +448,19 @@ extracted; confirm it shows the required site layout"). This applies
 regardless of how plausible the surrounding context makes compliance look —
 a confident-sounding score without an actual read is worse than an honest
 "can't tell."
+
+Citing a specific page like that requires a textual basis — a caption,
+title, section heading, or cross-reference (often recovered right alongside
+the unanalyzed drawing itself, e.g. "Fig. 2-1: Site Location Plan") that
+connects that page's unread visual content to *this* requirement. A
+site-location requirement can cite that caption's page; an unrelated
+requirement gets no basis from it and shouldn't. Whether a requirement is
+found or not doesn't depend on how any page happens to be flagged — flagging
+only decides whether a citation is honest. Without a textual connection, a
+missing requirement is just Missing (🚫), not Indeterminate — don't pull in
+every unanalyzed drawing page in the document on the chance one might be
+relevant; that buries the reviewer in citations that don't actually relate to
+what they're checking.
 
 ### 2.2 Scoring Logic by Check Method
 
@@ -503,7 +525,7 @@ Flag for manual review when:
 - The criteria's language itself is vague (e.g. "attach relevant documents" without specifying which)
 - The pending document's intent is reasonable but wording deviates significantly from required terminology
 - A judgment call is needed that exceeds textual analysis
-- The only evidence available is content that wasn't actually read (image, scanned page, technical drawing) — see §2.1
+- The only evidence available for this requirement is content that wasn't actually read — an image, a scanned/blank page, or a drawing's visual content with a textual basis (e.g. a caption) connecting it to this requirement — see §2.1
 
 ---
 
@@ -649,16 +671,27 @@ without needing to touch the others.
   reliably read as Indeterminate (§2.1), not Compliant/Partial/Weak/Missing.
   `extract_pdf_text.py --summary-only` identifies affected pages up front.
 
-- **A page could not be read (scanned, technical drawing, or timed out)** —
-  `extract_pdf_text.py` marks pages it couldn't process with an explicit note
-  in the Markdown rather than producing silent gaps. If a requirement's
-  evidence would be expected on such a page, score it Indeterminate (§2.1) and
-  flag it "Requires manual review" with the page and reason (e.g. "p.9 —
-  technical drawing, content not extracted"). **Never mark a requirement
-  Compliant just because an unreadable page exists where evidence was
-  expected** — its presence isn't evidence of its content, same as a
-  referenced attachment never provided. Retrying extraction won't fix this;
-  it needs a human to look at the rendered page.
+- **A page's drawing/diagram content was not analyzed (technical drawing)** —
+  `extract_pdf_text.py` still extracts any text actually present on such a
+  page (titles, captions, notes, paragraphs) and includes it like any other
+  page's text; only the drawing's own visual content (layout, measurements,
+  what's actually drawn) was never analyzed. Use that recovered text as the
+  basis for connecting the drawing to a specific requirement (§2.1) — e.g. a
+  caption like "Fig. 2-1: Site Location Plan" tells you what an unanalyzed
+  drawing on that page actually shows, so a requirement about site location
+  can cite it. Without such a connection, don't cite the page — score the
+  requirement on its own terms (usually Missing, not Indeterminate).
+
+- **A page produced no usable content at all (scanned, blank, or timed out)** —
+  `extract_pdf_text.py` marks such pages with an explicit note in the
+  Markdown rather than producing silent gaps. If a requirement's evidence
+  would be expected there, score it Indeterminate (§2.1) and flag it
+  "Requires manual review" with the page and reason (e.g. "p.12 — scanned
+  page, no text extracted"). **Never mark a requirement Compliant just
+  because an unreadable page exists where evidence was expected** — its
+  presence isn't evidence of its content, same as a referenced attachment
+  never provided. Retrying extraction won't fix this; it needs a human to
+  look at the rendered page.
 
 - **Multiple documents on either side** — Treat all criteria documents as one
   unified set of criteria, and all pending documents as one unified set —

@@ -257,7 +257,14 @@ def extract_page_markdown(page, pdfium_page=None):
                 "the page is included above. Visual review still needed to confirm what the drawing "
                 "shows; do not assume it satisfies a requirement without checking.]*"
             )
-            return "\n\n".join(parts), True, 0
+            # likely_scanned means "no usable text was recovered" — that's
+            # independent of whether this is a drawing page. A drawing page
+            # with a real paragraph of text (titles, notes, captions) is not
+            # scanned/blank; only flag it that way using the same threshold
+            # as every other page, so the Phase 0 intake summary doesn't tell
+            # the agent "no extractable content" when there plainly is some.
+            likely_scanned = len(text) < SCANNED_PAGE_CONTENT_THRESHOLD
+            return "\n\n".join(parts), likely_scanned, 0
 
     vector_object_count = len(page.lines) + len(page.curves) + len(page.rects)
     if vector_object_count > DRAWING_PAGE_VECTOR_THRESHOLD:

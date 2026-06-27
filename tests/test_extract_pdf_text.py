@@ -121,18 +121,35 @@ def test_is_drawing_page_ignores_non_path_objects(pdf_module):
     assert count == 0
 
 
-def test_extract_page_markdown_uses_pdfium_text_on_drawing_page(pdf_module, monkeypatch):
+class _UntouchedPdfplumberPage:
+    def __getattr__(self, name):
+        raise AssertionError(f"pdfplumber page.{name} should not be touched on a drawing page")
+
+
+def test_extract_page_markdown_drawing_page_with_real_text_is_not_likely_scanned(pdf_module, monkeypatch):
+    # A drawing page with a substantial recovered paragraph is NOT "no usable
+    # content" — likely_scanned should reflect actual text presence, not just
+    # "this is a drawing page" (which used to be hardcoded True regardless).
     monkeypatch.setattr(pdf_module, "DRAWING_PAGE_VECTOR_THRESHOLD", 800)
     objects = [_FakePdfiumObj(pdf_module.PDFIUM_PATH_OBJECT_TYPE) for _ in range(900)]
-    pdfium_page = _FakePdfiumPage(objects, text="2-1 基地位置圖\nEBM0205")
-
-    class _UntouchedPdfplumberPage:
-        def __getattr__(self, name):
-            raise AssertionError(f"pdfplumber page.{name} should not be touched on a drawing page")
+    long_text = "基地面積7354.95平方公尺，使用分區為第一種產業專用區，建蔽率60%，容積率490%。"
+    pdfium_page = _FakePdfiumPage(objects, text=long_text)
 
     md, likely_scanned, n_tables = pdf_module.extract_page_markdown(_UntouchedPdfplumberPage(), pdfium_page)
 
-    assert "2-1 基地位置圖" in md
+    assert long_text in md
+    assert "technical drawing" in md  # the inline annotation still notes the unanalyzed diagram
+    assert likely_scanned is False
+    assert n_tables == 0
+
+
+def test_extract_page_markdown_drawing_page_with_no_text_is_likely_scanned(pdf_module, monkeypatch):
+    monkeypatch.setattr(pdf_module, "DRAWING_PAGE_VECTOR_THRESHOLD", 800)
+    objects = [_FakePdfiumObj(pdf_module.PDFIUM_PATH_OBJECT_TYPE) for _ in range(900)]
+    pdfium_page = _FakePdfiumPage(objects, text="")
+
+    md, likely_scanned, n_tables = pdf_module.extract_page_markdown(_UntouchedPdfplumberPage(), pdfium_page)
+
     assert "technical drawing" in md
     assert likely_scanned is True
     assert n_tables == 0
