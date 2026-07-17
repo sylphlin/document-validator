@@ -4,7 +4,7 @@
 
 ## 개요
 
-![Document Processing Framework](images/workflow.jpeg)
+![Document Processing Framework](images/workflow.png)
 
 `document-validator`는 문서 적합성 검증 에이전트(agent)입니다. **기준 문서**(요구사항을 정의하는 문서 — 법규, 입찰 규격서, 심사위원회 의견, 내부 체크리스트 등)와 **검토 대상 문서**(검토받는 문서 — 신청서, 제안서, 사업계획서 등)가 주어지면, 기준 문서의 모든 요구사항이 검토 대상 문서에서 충족되는지 체계적으로 확인합니다.
 

@@ -4,7 +4,7 @@
 
 ## 總覽
 
-![Document Processing Framework](images/workflow.jpeg)
+![Document Processing Framework](images/workflow.png)
 
 `document-validator` 是一個文件符合性查核代理人（agent）。給定**查核標準文件**（定義要求的文件——可能是法規、招標規範、審查委員會意見、內部檢核清單）與**待查文件**（要被查核的文件——申請書、投標書、計劃書），它會系統性地檢查查核標準中的每一項要求，是否都在待查文件中被滿足。
 

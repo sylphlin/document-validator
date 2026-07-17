@@ -4,7 +4,7 @@
 
 ## 概览
 
-![Document Processing Framework](images/workflow.jpeg)
+![Document Processing Framework](images/workflow.png)
 
 `document-validator` 是一个文档合规核查代理（agent）。给定**核查标准文档**（定义要求的文档——可能是法规、招标规范、评审委员会意见、内部检查清单）与**待核查文档**（要被核查的文档——申请书、投标书、项目方案），它会系统地检查标准中的每一项要求是否在待核查文档中得到满足。
 

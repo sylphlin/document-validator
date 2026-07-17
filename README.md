@@ -4,7 +4,7 @@
 
 ## Overview
 
-![Document Processing Framework](images/workflow.jpeg)
+![Document Processing Framework](images/workflow.png)
 
 `document-validator` is a document conformance agent. Given **Criteria Documents** (what defines the requirements — a regulation, a tender specification, review-committee comments, an internal checklist) and **Pending Documents** (the document(s) being checked against it — an application, a bid, a project plan), it systematically checks whether every requirement in the criteria is addressed in the pending documents.
 
