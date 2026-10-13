@@ -1,0 +1,33 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*.pyc
+*$py.class
+*.egg-info/
+
+# Environments
+.env
+!.env.example
+.venv
+.venv*
+env/
+venv/
+
+# Test & Eval artifacts
+.pytest_cache/
+.coverage
+artifacts/
+uv.lock
+
+# ADK & Agent CLI specific
+.adk/
+.google-agents-cli/
+.agents-cli-scripts/
+.saved_chats
+
+# OS & Editor
+.DS_Store
+.vscode/
+.idea/
+*.tmp
+*.bak

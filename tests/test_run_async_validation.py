@@ -2,7 +2,7 @@
 import importlib.util
 from pathlib import Path
 
-MODULE_PATH = Path(__file__).parent.parent / "skill" / "scripts" / "run_async_validation.py"
+MODULE_PATH = Path(__file__).parent.parent / "skills" / "document-validator" / "scripts" / "run_async_validation.py"
 
 
 def _load():

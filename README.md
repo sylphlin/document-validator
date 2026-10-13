@@ -1,5 +1,10 @@
 # document-validator
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Google GenAI SDK](https://img.shields.io/badge/Google%20GenAI%20SDK-v2.4+-4285F4.svg)](https://github.com/googleapis/python-genai)
+[![Google ADK](https://img.shields.io/badge/Google%20ADK-v2.0+-orange.svg)](https://google.github.io/adk-docs/)
+[![Gemini 3.8 Flash](https://img.shields.io/badge/Gemini%203.8-Flash-yellow.svg)](https://ai.google.dev/)
+
 [English (en)](README.md) | [繁體中文 (zh-TW)](README.zh-TW.md) | [简体中文 (zh-CN)](README.zh-CN.md) | [日本語 (ja)](README.ja.md) | [한국어 (ko)](README.ko.md)
 
 ## Overview
@@ -36,9 +41,9 @@ flowchart TD
 ### Phase 0 — Intake
 The agent inventories all provided documents and assigns short IDs for traceability throughout the report (e.g. `C-1`, `C-2` for the criteria documents; `P-1`, `P-2`, `P-3` for the pending documents). If any document is unstructured or image-based, the agent announces this and proceeds with best-effort extraction.
 
-Documents that are too large to paste into chat can be provided as a Google Drive link instead (e.g. "Here is the pending document: https://drive.google.com/file/d/.../view"). The agent fetches the file using [`skill/scripts/fetch_drive_file.py`](skill/scripts/fetch_drive_file.py), which calls the Google Drive API directly — no chat-client connector required, so this also works when the skill runs as an agent deployed elsewhere (e.g. Google Agent Engine). It authenticates with Application Default Credentials, exports Google-native documents (Docs/Sheets/Slides) to PDF first so every document follows the same page-citation convention, reads plain-text/Markdown files directly into context, and expands folder links into one inventory entry per file inside. The target file must be shared with whatever identity those credentials resolve to (the deployed service account, for example) — a public "anyone with the link" share is not required and, for sensitive government filings, usually shouldn't be used.
+Documents that are too large to paste into chat can be provided as a Google Drive link instead (e.g. "Here is the pending document: https://drive.google.com/file/d/.../view"). The agent fetches the file using [`skills/document-validator/scripts/fetch_drive_file.py`](skills/document-validator/scripts/fetch_drive_file.py), which calls the Google Drive API directly — no chat-client connector required, so this also works when the skill runs as an agent deployed elsewhere (e.g. Google Agent Engine). It authenticates with Application Default Credentials, exports Google-native documents (Docs/Sheets/Slides) to PDF first so every document follows the same page-citation convention, reads plain-text/Markdown files directly into context, and expands folder links into one inventory entry per file inside. The target file must be shared with whatever identity those credentials resolve to (the deployed service account, for example) — a public "anyone with the link" share is not required and, for sensitive government filings, usually shouldn't be used.
 
-For PDF inputs, the agent uses [`skill/scripts/extract_pdf_text.py`](skill/scripts/extract_pdf_text.py) to convert each page to Markdown — preserving page numbers for citation, rendering tables as real Markdown tables instead of jumbled text, and flagging pages that look scanned/image-based. Detected images are noted but not extracted, so a reviewer knows to check the original PDF for figures. A page that takes too long (a large embedded image) times out and is flagged for manual review. A page dense with vector graphics (a CAD/3D drawing) is handled differently: any text on it — titles, captions, notes — is still extracted normally; only the drawing's own visual content is skipped, since that needs a human to look at the rendered page either way. Large PDFs are pulled in page-range chunks instead of one large dump, so a 100+ page criteria document doesn't need to be loaded all at once.
+For PDF inputs, the agent uses [`skills/document-validator/scripts/extract_pdf_text.py`](skills/document-validator/scripts/extract_pdf_text.py) to convert each page to Markdown — preserving page numbers for citation, rendering tables as real Markdown tables instead of jumbled text, and flagging pages that look scanned/image-based. Detected images are noted but not extracted, so a reviewer knows to check the original PDF for figures. A page that takes too long (a large embedded image) times out and is flagged for manual review. A page dense with vector graphics (a CAD/3D drawing) is handled differently: any text on it — titles, captions, notes — is still extracted normally; only the drawing's own visual content is skipped, since that needs a human to look at the rendered page either way. Large PDFs are pulled in page-range chunks instead of one large dump, so a 100+ page criteria document doesn't need to be loaded all at once.
 
 ### Phase 1 — Criteria Checklist Extraction
 The agent parses the criteria documents and extracts every requirement, classifying each one by type:
@@ -83,8 +88,17 @@ Disposition options: *Approve* / *Request correction* / *Return filing* / *Escal
 
 ## How to Use
 
+### Antigravity Usage & Scenarios
+
+When installed as an Antigravity plugin or skill, you can invoke `document-validator` with minimal `/` slash commands + `@` file mentions, or natural language prompts:
+
+| Scenario | Minimal Command (`/` + `@`) | Natural Language Prompt |
+|---|---|---|
+| **Local PDF Validation** | `/document-validator Criteria: @guidelines.pdf, Pending: @application.pdf` | `"Please validate @application.pdf against the criteria in @guidelines.pdf."` |
+| **Google Drive Validation** | `/document-validator Criteria: https://drive.google.com/file/d/.../view, Pending: https://drive.google.com/file/d/.../view` | `"Check whether this pending proposal on Drive meets all mandatory requirements in our tender spec."` |
+
 **Step 1** — Describe what you're validating and provide the documents — PDFs
-as a Google Drive link (or a direct upload), plain text/Markdown pasted right
+as a Google Drive link (or a direct upload / local `@` file reference), plain text/Markdown pasted right
 into the message. The criteria don't have to be a regulation; a few example
 scenarios:
 
@@ -179,78 +193,139 @@ Checklist with you before scoring (see Phase 1's checkpoint above).
 
 ```
 document-validator/
-├── agent/                  # ADK wrapper — loads skill/SKILL.md as the system prompt
-│   ├── __init__.py         # Exports root_agent for the ADK loader
-│   ├── agent.py            # LlmAgent construction
-│   ├── drive_tool.py       # fetch_drive_file_oauth — per-user OAuth Drive access (deployed only)
-│   ├── skill_loader.py     # SKILL.md frontmatter parser
-│   └── tools.py            # start_job/check_job (background script execution) and read_asset
-├── skill/                  # The skill itself — this is what defines agent behavior
-│   ├── SKILL.md            # Phases, requirement types, report format, execution guidelines
-│   └── scripts/
-│       ├── extract_pdf_text.py   # PDF → Markdown, launched via start_job/check_job
-│       ├── fetch_drive_file.py   # Google Drive API fetch (service account/ADC), launched via start_job/check_job
-│       └── gcs_state.py          # Backs up files/state with no other durable source to GCS
-├── tests/                  # Wrapper unit tests (agent construction, tool execution)
-│   └── eval/                     # Behavior-level eval (see "Evaluation" below) — not pytest
-│       ├── datasets/basic-dataset.json  # Eval cases — inline criteria + pending-document text
-│       └── eval_config.yaml             # Custom metrics: disposition correctness, etc.
-├── agents-cli-manifest.yaml  # Lets `agents-cli` (eval/dev-loop tooling) find agent/
-├── deploy.sh               # Deploys to Google Cloud Agent Runtime (Agent Engine)
-├── .env.example            # Copy to .env and fill in before deploying
-├── requirements.txt        # Runtime dependencies, installed into the deployed container
-└── pyproject.toml          # Local dev dependencies and test config
+├── plugin.json                     # Agent Plugins 1.0 manifest (skills & rules registration)
+├── AGENTS.md                       # Repository-level agent rules & engineering standards
+├── rules/
+│   └── AGENTS.md                   # Client execution invariants distributed via plugin.json
+├── skills/                         # Canonical Single Source of Truth (SSOT) for Agent Plugins 1.0
+│   └── document-validator/
+│       ├── SKILL.md                # Phases, requirement types, report format, execution guidelines
+│       └── scripts/
+│           ├── extract_pdf_text.py       # PDF → Markdown extraction
+│           ├── fetch_drive_file.py       # Google Drive API fetch (service account / ADC)
+│           ├── gcs_state.py              # Backs up files/state with no other durable source to GCS
+│           └── run_async_validation.py   # Map-Reduce batch conformance scoring (gemini-3.8-flash)
+├── gemini-enterprise/              # Isolated Gemini Enterprise Cloud Agent Package
+│   ├── agent/                      # ADK wrapper — loads skill/SKILL.md as the system prompt
+│   │   ├── __init__.py             # Exports root_agent for the ADK loader
+│   │   ├── agent.py                # LlmAgent construction (defaults to gemini-3.8-flash)
+│   │   ├── drive_tool.py           # fetch_drive_file_oauth — per-user OAuth Drive access (deployed only)
+│   │   ├── recall.py               # Automatic GCS session restoration after container swap
+│   │   ├── skill_loader.py         # SKILL.md frontmatter parser
+│   │   └── tools.py                # start_job/check_job (background script execution) and read_asset
+│   ├── skill/                      # Downstream mirror of skills/document-validator/ (verified by check_core_sync.py)
+│   ├── tests/
+│   │   └── eval/                   # Behavior-level eval for `agents-cli eval`
+│   │       ├── datasets/basic-dataset.json
+│   │       └── eval_config.yaml
+│   ├── agents-cli-manifest.yaml    # Manifest for `agents-cli eval` and `agents-cli publish`
+│   ├── deployment_metadata.json    # Auto-updated by deploy.sh for `agents-cli publish gemini-enterprise`
+│   ├── deploy.sh                   # Convenience wrapper forwarding to root ./deploy.sh
+│   ├── requirements.txt            # Runtime dependencies installed into the deployed container
+│   ├── pyproject.toml              # Gemini Enterprise package metadata
+│   └── .env.example                # Cloud environment template
+├── tests/                          # Unit tests & SSOT synchronization guard
+│   ├── check_core_sync.py          # Verifies skills/document-validator/ == gemini-enterprise/skill/
+│   └── test_*.py                   # Wrapper & script unit tests
+├── setup.sh                        # Automated GCP infrastructure, GCS buckets, & IAM setup
+├── deploy.sh                       # Deploys to Vertex AI Agent Engine & registers with Gemini Enterprise
+├── .env.example                    # Copy to .env and fill in before running setup.sh / deploy.sh
+└── pyproject.toml                  # Local dev dependencies and pytest configuration
 ```
 
-This repo is a complete, deployable agent: the [`agent/`](agent/) wrapper is a thin ADK loader (based on [agent-skill-wrapper](https://agentskills.io/specification)) that turns [`skill/SKILL.md`](skill/SKILL.md) into the agent's system prompt and exposes its `scripts/` as a callable tool. Nothing in `agent/` is specific to document validation — changing the agent's behavior means editing `skill/SKILL.md`, not the wrapper code. The one exception is [`drive_tool.py`](agent/drive_tool.py): it needs ADK's `ToolContext` to drive an OAuth consent flow, which only exists for a proper ADK FunctionTool — not for a subprocess script invoked via `start_job`/`check_job`. It's registered only when `GOOGLE_OAUTH_CLIENT_ID` is configured (see Deployment below); otherwise the agent falls back to `fetch_drive_file.py`.
+This repository is structured as a dual-target package compliant with the **[Agent Plugins 1.0 Specification](https://agent-plugins.org/specification)**:
+1. **Google Antigravity Plugin & Skill (`skills/document-validator/`)**: Serves as the canonical Single Source of Truth (SSOT) for local CLI/IDE agent execution.
+2. **Gemini Enterprise Cloud Agent (`gemini-enterprise/`)**: Isolates the ADK wrapper ([`gemini-enterprise/agent/`](gemini-enterprise/agent/)) and a synchronized mirror of the skill ([`gemini-enterprise/skill/`](gemini-enterprise/skill/)). The `agent/` wrapper turns [`SKILL.md`](skills/document-validator/SKILL.md) into the agent's system prompt and exposes its `scripts/` via `start_job`/`check_job`. Nothing in `agent/` is specific to document validation — changing the agent's behavior means editing `skills/document-validator/SKILL.md`, not the wrapper code. The one exception is [`drive_tool.py`](gemini-enterprise/agent/drive_tool.py): it needs ADK's `ToolContext` to drive an OAuth consent flow, which only exists for a proper ADK FunctionTool. It is registered only when `GOOGLE_OAUTH_CLIENT_ID` is configured; otherwise the agent falls back to `fetch_drive_file.py`.
 
-## Evaluation
+## Evaluation & Testing
 
-`tests/test_*.py` only checks wrapper mechanics (does `start_job` execute a script, does path traversal get rejected) — it never asserts on what the agent actually decides, since LLM output is non-deterministic and that kind of pytest assertion is flaky by nature. Whether the compliance/gap-analysis logic itself is *correct* — right disposition, right gap identified — is validated separately via [`google-agents-cli`](https://pypi.org/project/google-agents-cli/)'s eval tooling:
+### Unit Tests & SSOT Sync Check
 
 ```bash
+python3 tests/check_core_sync.py
+pytest -v
+```
+
+### Behavior-Level Evaluation (`agents-cli eval`)
+
+`tests/test_*.py` checks wrapper and script mechanics (`start_job` execution, path traversal rejection, PDF extraction, async scoring). Whether the compliance/gap-analysis logic itself is *correct* — right disposition, right gap identified — is validated via [`google-agents-cli`](https://pypi.org/project/google-agents-cli/)'s eval tooling inside `gemini-enterprise/`:
+
+```bash
+cd gemini-enterprise
 agents-cli eval generate   # runs the real agent over tests/eval/datasets/basic-dataset.json
 agents-cli eval grade      # scores the traces against tests/eval/eval_config.yaml's metrics
 ```
 
-Requires `gcloud auth application-default login` and a `GOOGLE_CLOUD_PROJECT` (pass `--project` to override) — this calls the real Gemini model. The three seeded cases cover an approve, a missing-mandatory-requirement, and a disqualifying-condition case; add more under `tests/eval/datasets/` as the skill grows. See `agents-cli eval --help` and the `google-agents-cli-eval` skill for the dataset schema, metric authoring, and the iterate-on-failures workflow.
+Requires `gcloud auth application-default login` and a `GOOGLE_CLOUD_PROJECT` (pass `--project` to override) — this calls the real Gemini model (`gemini-3.8-flash`). The three seeded cases cover an approve, a missing-mandatory-requirement, and a disqualifying-condition case; add more under `gemini-enterprise/tests/eval/datasets/` as the skill grows. See `agents-cli eval --help` and the `google-agents-cli-eval` skill for the dataset schema, metric authoring, and the iterate-on-failures workflow.
 
-## Deployment
+---
 
-**1. Configure:**
+## Installation & Deployment
+
+Select one of the two deployment methods below based on your target environment:
+
+| Method | Target Environment | Setup Tool | Primary Interface |
+| :--- | :--- | :--- | :--- |
+| **Method 1: Google Antigravity & Agent Plugins** | Local Antigravity IDE and Agent Skill | `pip` / `uv` + `./setup.sh` | Antigravity IDE chat |
+| **Method 2: Gemini Enterprise** | Cloud Vertex AI Agent Runtime | `./setup.sh` + `./deploy.sh` | Gemini Enterprise Web UI, Agent Engine |
+
+### Method 1: Google Antigravity Plugin & Skill Installation
+
+Install as an **Agent Plugins 1.0** plugin so your agent automatically loads both `skills/document-validator/` and `rules/AGENTS.md`:
 
 ```bash
-cp .env.example .env
+# Option A: Global Plugin Installation (Available across all workspaces)
+mkdir -p ~/.gemini/config/plugins
+git clone https://github.com/sylphlin/document-validator.git ~/.gemini/config/plugins/document-validator
+
+# Option B: Workspace Plugin Installation (Scoped to current project)
+mkdir -p .agents/plugins
+git clone https://github.com/sylphlin/document-validator.git .agents/plugins/document-validator
+
+# Option C: Legacy Single-Skill Symlink (~/.gemini/config/skills/ compatibility)
+mkdir -p ~/.gemini/config/skills
+ln -s ~/.gemini/config/plugins/document-validator/skills/document-validator ~/.gemini/config/skills/document-validator
 ```
 
-Edit `.env` — at minimum set `GOOGLE_CLOUD_PROJECT` and `STAGING_BUCKET`. Bump `AGENT_MEMORY` (default `8Gi`) if criteria or pending-document PDFs run large — the container is silently OOM-killed with no error log if it runs out of memory.
-
-**2. Deploy:**
+Install local Python dependencies and initialize the Google Cloud environment (optional if using Google Drive fetch or async validation):
 
 ```bash
+cd ~/.gemini/config/plugins/document-validator
+pip install -e ".[dev]"
+./setup.sh --project <your-project-id>
+```
+
+### Method 2: Gemini Enterprise Cloud Deployment
+
+#### 1. Cloud Infrastructure Provisioning (`setup.sh`)
+
+Run `setup.sh` to automatically enable required GCP APIs, create and configure the session bucket (`gs://document-validator-sessions-${PROJECT_ID}` with 15-day lifecycle auto-cleanup) and staging bucket (`gs://document-validator-staging-${PROJECT_ID}`), bind Service Account IAM permissions, and write configuration to `.env`:
+
+```bash
+./setup.sh -p <your-project-id> -r us-central1
+# Preview actions without making changes:
+./setup.sh --dry-run -p <your-project-id>
+```
+
+Edit `.env` if needed — bump `AGENT_MEMORY` (default `8Gi`) if criteria or pending-document PDFs run large, as the container is silently OOM-killed if it runs out of memory.
+
+#### 2. Deploy to Vertex AI Agent Engine & Register with Gemini Enterprise (`deploy.sh`)
+
+```bash
+# Deploy to Vertex AI Agent Engine
 ./deploy.sh
-# Or override the project/region from .env without editing it:
+
+# Deploy and automatically register with Gemini Enterprise via agents-cli publish
+./deploy.sh --project <your-project-id> --region us-central1 --ge <your-ge-app-id>
+
+# Or use positional arguments:
 ./deploy.sh <project-id> <region>
 ```
 
-This creates a local virtual environment, installs `requirements.txt`, and deploys to Google Cloud Agent Runtime (formerly Vertex AI Agent Engine). Redeploying after the first run updates the same instance (tracked via `AGENT_ENGINE_ID` in `.env`) instead of creating a new one.
+`deploy.sh` stages `gemini-enterprise/agent` and `gemini-enterprise/skill` together, deploys via `adk deploy agent_engine`, saves the `AGENT_ENGINE_ID` to `.env`, and writes `gemini-enterprise/deployment_metadata.json`. Redeploying after the first run updates the existing Agent Engine instance in-place.
 
-**3. Register with Gemini Enterprise** (optional): follow the Reasoning Engine Resource ID printed at the end of `deploy.sh`'s output to connect it as a custom agent in the Gemini Enterprise Admin Console.
+#### 3. Google Drive Access & Session Persistence Notes
 
-**Before deploying for real use:** the default Google Drive fetch path requires the deployed service account to actually have access to the files reviewers will link to — see the Phase 0 note above. Share files with the service account's email address; "anyone with the link" is not required and usually shouldn't be used for government filings.
-
-**Optional — per-user Drive access instead of a service account:** set `GOOGLE_OAUTH_CLIENT_ID`/`GOOGLE_OAUTH_CLIENT_SECRET` in `.env` (see `.env.example`) to enable `agent/drive_tool.py`. With it configured, the agent accesses Drive as whichever user is signed in through Gemini Enterprise — that user's own files just need to be shared with them normally, no per-file sharing with the service account required. Create the OAuth client in Google Cloud Console → APIs & Services → Credentials (type "Web application", Drive API enabled, consent screen scoped to `drive.readonly`). Leave both blank to skip this and use the service-account path above.
-
-Agent Engine container instances are ephemeral and can be swapped between turns of the same conversation. Files saved only to local disk (a direct upload, or extraction state) don't survive that. `scripts/gcs_state.py` backs up what has no other durable source — see SKILL.md §0.0 and §1 — to a GCS bucket named `document-validator-sessions-{GOOGLE_CLOUD_PROJECT}`. Create it once and grant the deployed service account write access before deploying:
-
-```bash
-gsutil mb gs://document-validator-sessions-your-project-id
-gsutil iam ch serviceAccount:your-deployed-sa@your-project-id.iam.gserviceaccount.com:roles/storage.objectAdmin gs://document-validator-sessions-your-project-id
-```
-
-### Local development
-
-```bash
-pip install -e ".[dev]"
-pytest -v
-```
+- **Service Account Drive Access (Default):** The default Google Drive fetch path (`fetch_drive_file.py`) requires the deployed service account to have access to the files reviewers link to. Share target Drive files/folders with the service account's email address; public "anyone with the link" sharing is not required.
+- **Per-User OAuth Drive Access (Optional):** Set `GOOGLE_OAUTH_CLIENT_ID` and `GOOGLE_OAUTH_CLIENT_SECRET` in `.env` (see `.env.example`) to enable [`gemini-enterprise/agent/drive_tool.py`](gemini-enterprise/agent/drive_tool.py). When configured, the agent accesses Drive as whichever user is signed in through Gemini Enterprise. Create the OAuth client in Google Cloud Console → APIs & Services → Credentials (type "Web application", Drive API enabled, consent screen scoped to `drive.readonly`). Leave both blank to use the service-account path.
+- **Ephemeral Container State (`gcs_state.py` & `recall.py`):** Agent Engine container instances are ephemeral and can be swapped between turns of the same conversation. `gcs_state.py` backs up uploaded files and extracted state to `gs://document-validator-sessions-{GOOGLE_CLOUD_PROJECT}` (created automatically by `./setup.sh`), and `recall.py` transparently restores them when a container swap occurs.

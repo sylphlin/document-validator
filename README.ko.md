@@ -1,5 +1,10 @@
 # document-validator
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Google GenAI SDK](https://img.shields.io/badge/Google%20GenAI%20SDK-v2.4+-4285F4.svg)](https://github.com/googleapis/python-genai)
+[![Google ADK](https://img.shields.io/badge/Google%20ADK-v2.0+-orange.svg)](https://google.github.io/adk-docs/)
+[![Gemini 3.8 Flash](https://img.shields.io/badge/Gemini%203.8-Flash-yellow.svg)](https://ai.google.dev/)
+
 [English (en)](README.md) | [繁體中文 (zh-TW)](README.zh-TW.md) | [简体中文 (zh-CN)](README.zh-CN.md) | [日本語 (ja)](README.ja.md) | [한국어 (ko)](README.ko.md)
 
 ## 개요
@@ -36,9 +41,9 @@ flowchart TD
 ### Phase 0 — 접수
 에이전트는 제공된 모든 문서를 목록화하고, 보고서 전체에서 추적할 수 있도록 짧은 ID를 부여합니다(예: 기준 문서는 `C-1`, `C-2`; 검토 대상 문서는 `P-1`, `P-2`, `P-3`). 문서가 비정형이거나 이미지 위주인 경우, 에이전트는 이를 알리고 최선을 다해 추출을 진행합니다.
 
-채팅에 직접 붙여넣기에는 너무 큰 문서는 대신 Google Drive 링크로 제공할 수 있습니다(예: "이것이 검토 대상 문서입니다: https://drive.google.com/file/d/.../view"). 에이전트는 [`skill/scripts/fetch_drive_file.py`](skill/scripts/fetch_drive_file.py)를 통해 Google Drive API를 직접 호출합니다 — 채팅 클라이언트의 connector가 필요 없으므로, 이 스킬이 다른 환경(예: Google Agent Engine)에 배포된 에이전트로 실행될 때도 동작합니다. 인증에는 Application Default Credentials를 사용하며, Google 네이티브 문서(Docs/Sheets/Slides)는 먼저 PDF로 내보내 모든 문서가 동일한 페이지 인용 규칙을 따르도록 하고, 일반 텍스트/Markdown 파일은 내용을 바로 읽어들이며, 폴더 링크는 그 안의 각 파일을 목록의 개별 항목으로 펼칩니다. 대상 파일은 해당 자격 증명이 가리키는 신원(예: 배포된 service account)에 공유되어 있어야 합니다 — "링크를 아는 누구나 접근 가능"한 공개 공유는 필요하지 않으며, 민감한 행정 문서에는 보통 사용하지 않아야 합니다.
+채팅에 직접 붙여넣기에는 너무 큰 문서는 대신 Google Drive 링크로 제공할 수 있습니다(예: "이것이 검토 대상 문서입니다: https://drive.google.com/file/d/.../view"). 에이전트는 [`skills/document-validator/scripts/fetch_drive_file.py`](skills/document-validator/scripts/fetch_drive_file.py)를 통해 Google Drive API를 직접 호출합니다 — 채팅 클라이언트의 connector가 필요 없으므로, 이 스킬이 다른 환경(예: Google Agent Engine)에 배포된 에이전트로 실행될 때도 동작합니다. 인증에는 Application Default Credentials를 사용하며, Google 네이티브 문서(Docs/Sheets/Slides)는 먼저 PDF로 내보내 모든 문서가 동일한 페이지 인용 규칙을 따르도록 하고, 일반 텍스트/Markdown 파일은 내용을 바로 읽어들이며, 폴더 링크는 그 안의 각 파일을 목록의 개별 항목으로 펼칩니다. 대상 파일은 해당 자격 증명이 가리키는 신원(예: 배포된 service account)에 공유되어 있어야 합니다 — "링크를 아는 누구나 접근 가능"한 공개 공유는 필요하지 않으며, 민감한 행정 문서에는 보통 사용하지 않아야 합니다.
 
-PDF 입력의 경우, 에이전트는 [`skill/scripts/extract_pdf_text.py`](skill/scripts/extract_pdf_text.py)를 사용해 각 페이지를 Markdown으로 변환합니다 — 인용을 위해 페이지 번호를 보존하고, 표를 뒤섞인 텍스트가 아닌 실제 Markdown 표로 표현하며, 스캔/이미지 위주로 보이는 페이지에 표시를 남깁니다. 감지된 이미지는 기록되지만 내용이 추출되지는 않으므로, 검토자는 원본 PDF에서 도표를 확인해야 함을 알 수 있습니다. 처리 시간이 너무 오래 걸리는 페이지(큰 삽입 이미지)는 시간 초과되어 수동 검토 표시가 남습니다. 벡터 그래픽이 밀집된 페이지(CAD/3D 도면)는 다르게 처리됩니다 — 페이지의 텍스트(제목, 캡션, 주석)는 평소대로 추출되며, 도면 자체의 시각적 내용만 건너뜁니다. 어차피 사람이 원본 페이지를 직접 확인해야 하기 때문입니다. 큰 PDF는 한 번에 전부 읽어들이는 대신 페이지 범위 단위로 청크 처리되므로, 100페이지가 넘는 기준 문서도 한 번에 모두 로드할 필요가 없습니다.
+PDF 입력의 경우, 에이전트는 [`skills/document-validator/scripts/extract_pdf_text.py`](skills/document-validator/scripts/extract_pdf_text.py)를 사용해 각 페이지를 Markdown으로 변환합니다 — 인용을 위해 페이지 번호를 보존하고, 표를 뒤섞인 텍스트가 아닌 실제 Markdown 표로 표현하며, 스캔/이미지 위주로 보이는 페이지에 표시를 남깁니다. 감지된 이미지는 기록되지만 내용이 추출되지는 않으므로, 검토자는 원본 PDF에서 도표를 확인해야 함을 알 수 있습니다. 처리 시간이 너무 오래 걸리는 페이지(큰 삽입 이미지)는 시간 초과되어 수동 검토 표시가 남습니다. 벡터 그래픽이 밀집된 페이지(CAD/3D 도면)는 다르게 처리됩니다 — 페이지의 텍스트(제목, 캡션, 주석)는 평소대로 추출되며, 도면 자체의 시각적 내용만 건너뜁니다. 어차피 사람이 원본 페이지를 직접 확인해야 하기 때문입니다. 큰 PDF는 한 번에 전부 읽어들이는 대신 페이지 범위 단위로 청크 처리되므로, 100페이지가 넘는 기준 문서도 한 번에 모두 로드할 필요가 없습니다.
 
 ### Phase 1 — 기준 체크리스트 추출
 에이전트는 기준 문서를 분석하여 모든 요구사항을 추출하고, 다음과 같이 분류합니다:
@@ -83,7 +88,16 @@ PDF 입력의 경우, 에이전트는 [`skill/scripts/extract_pdf_text.py`](skil
 
 ## 사용 방법
 
-**1단계** — 무엇을 검증하려는지 설명하고 문서를 제공합니다 — PDF는 Google Drive 링크(또는 직접 업로드)로, 일반 텍스트/Markdown은 메시지에 직접 붙여넣습니다. 기준이 반드시 법규일 필요는 없습니다; 몇 가지 예시 시나리오:
+### Antigravity 사용 방법 및 시나리오
+
+Antigravity 플러그인 또는 스킬로 설치된 경우, 최소한의 `/` 슬래시 명령어와 `@` 파일 멘션, 또는 자연어 프롬프트로 `document-validator`를 호출할 수 있습니다:
+
+| 시나리오 | 최소 명령어 (`/` + `@`) | 자연어 프롬프트 |
+|---|---|---|
+| **로컬 PDF 검증** | `/document-validator Criteria: @guidelines.pdf, Pending: @application.pdf` | `"@guidelines.pdf의 기준에 따라 @application.pdf가 요건을 충족하는지 검증해 주세요."` |
+| **Google Drive 검증** | `/document-validator Criteria: https://drive.google.com/file/d/.../view, Pending: https://drive.google.com/file/d/.../view` | `"Drive에 있는 이 제안서가 우리 입찰 규격서의 모든 필수 요건을 충족하는지 확인해 주세요."` |
+
+**1단계** — 무엇을 검증하려는지 설명하고 문서를 제공합니다 — PDF는 Google Drive 링크(또는 직접 업로드 / 로컬 `@` 파일 참조)로, 일반 텍스트/Markdown은 메시지에 직접 붙여넣습니다. 기준이 반드시 법규일 필요는 없습니다; 몇 가지 예시 시나리오:
 
 ### 시나리오: 보조금/지원금 신청 심사
 
@@ -173,78 +187,139 @@ PDF 입력의 경우, 에이전트는 [`skill/scripts/extract_pdf_text.py`](skil
 
 ```
 document-validator/
-├── agent/                  # ADK wrapper — skill/SKILL.md를 시스템 프롬프트로 로드
-│   ├── __init__.py         # ADK 로더용 root_agent 내보내기
-│   ├── agent.py            # LlmAgent 구성
-│   ├── drive_tool.py       # fetch_drive_file_oauth — 사용자 개인 OAuth로 Drive 접근(배포 환경 전용)
-│   ├── skill_loader.py     # SKILL.md frontmatter 파서
-│   └── tools.py            # start_job/check_job(백그라운드 스크립트 실행)과 read_asset
-├── skill/                  # 스킬 본체 — 에이전트 동작을 정의하는 곳
-│   ├── SKILL.md            # 각 단계, 요구사항 유형, 보고서 형식, 실행 가이드라인
-│   └── scripts/
-│       ├── extract_pdf_text.py   # PDF → Markdown, start_job/check_job으로 실행
-│       ├── fetch_drive_file.py   # Google Drive API 가져오기(service account/ADC), start_job/check_job으로 실행
-│       └── gcs_state.py          # 다른 영속적 저장 수단이 없는 파일/상태를 GCS에 백업
-├── tests/                  # Wrapper 단위 테스트(에이전트 구성, 도구 실행)
-│   └── eval/                     # 행동 수준 평가(아래 "평가" 참조) — pytest가 아님
-│       ├── datasets/basic-dataset.json  # 평가 케이스 — 인라인 기준 및 검토 대상 문서 텍스트
-│       └── eval_config.yaml             # 사용자 정의 지표: 판정 정확성 등
-├── agents-cli-manifest.yaml  # `agents-cli`(평가/개발 루프 도구)가 agent/를 찾도록 함
-├── deploy.sh               # Google Cloud Agent Runtime(Agent Engine)에 배포
-├── .env.example            # 배포 전 .env로 복사하여 값을 입력
-├── requirements.txt        # 런타임 의존성, 배포된 컨테이너에 설치됨
-└── pyproject.toml          # 로컬 개발 의존성 및 테스트 설정
+├── plugin.json                     # Agent Plugins 1.0 매니페스트 (skills 및 rules 등록)
+├── AGENTS.md                       # 저장소 수준의 에이전트 규칙 및 엔지니어링 표준
+├── rules/
+│   └── AGENTS.md                   # plugin.json을 통해 배포되는 클라이언트 실행 불변 규칙(Invariants)
+├── skills/                         # Agent Plugins 1.0을 준수하는 단일 진실 공급원(SSOT)
+│   └── document-validator/
+│       ├── SKILL.md                # 각 단계, 요구사항 유형, 보고서 형식, 실행 가이드라인
+│       └── scripts/
+│           ├── extract_pdf_text.py       # PDF → Markdown 추출
+│           ├── fetch_drive_file.py       # Google Drive API 가져오기 (service account / ADC)
+│           ├── gcs_state.py              # 다른 영속적 저장 수단이 없는 파일/상태를 GCS에 백업
+│           └── run_async_validation.py   # Map-Reduce 배치 적합성 채점 (기본값 gemini-3.8-flash)
+├── gemini-enterprise/              # 격리된 Gemini Enterprise 클라우드 에이전트 패키지
+│   ├── agent/                      # ADK wrapper — skill/SKILL.md를 시스템 프롬프트로 로드
+│   │   ├── __init__.py             # ADK 로더용 root_agent 내보내기
+│   │   ├── agent.py                # LlmAgent 구성 (기본값 gemini-3.8-flash)
+│   │   ├── drive_tool.py           # fetch_drive_file_oauth — 사용자 개인 OAuth로 Drive 접근(배포 환경 전용)
+│   │   ├── recall.py               # 컨테이너 교체 후 GCS에서 세션 파일 자동 복원
+│   │   ├── skill_loader.py         # SKILL.md frontmatter 파서
+│   │   └── tools.py                # start_job/check_job(백그라운드 스크립트 실행)과 read_asset
+│   ├── skill/                      # skills/document-validator/의 다운스트림 미러 (check_core_sync.py로 검증)
+│   ├── tests/
+│   │   └── eval/                   # `agents-cli eval`용 행동 수준 평가
+│   │       ├── datasets/basic-dataset.json
+│   │       └── eval_config.yaml
+│   ├── agents-cli-manifest.yaml    # `agents-cli eval` 및 `agents-cli publish`용 매니페스트
+│   ├── deployment_metadata.json    # deploy.sh가 자동 업데이트하며 `agents-cli publish gemini-enterprise`에서 사용
+│   ├── deploy.sh                   # 루트 ./deploy.sh로 전달하는 편의 스크립트
+│   ├── requirements.txt            # 배포된 컨테이너에 설치되는 런타임 의존성
+│   ├── pyproject.toml              # Gemini Enterprise 패키지 설정
+│   └── .env.example                # 클라우드 환경 변수 템플릿
+├── tests/                          # 단위 테스트 및 SSOT 동기화 검증
+│   ├── check_core_sync.py          # skills/document-validator/와 gemini-enterprise/skill/의 일치 여부 검증
+│   └── test_*.py                   # Wrapper 및 스크립트 단위 테스트
+├── setup.sh                        # GCP 인프라, GCS 버킷, IAM 권한 자동 프로비저닝 스크립트
+├── deploy.sh                       # Vertex AI Agent Engine 배포 및 Gemini Enterprise 등록
+├── .env.example                    # setup.sh / deploy.sh 실행 전 .env로 복사하여 사용
+└── pyproject.toml                  # 로컬 개발 의존성 및 pytest 설정
 ```
 
-이 저장소는 완전하고 배포 가능한 에이전트입니다: [`agent/`](agent/) wrapper는 얇은 ADK 로더([agent-skill-wrapper](https://agentskills.io/specification) 기반)로, [`skill/SKILL.md`](skill/SKILL.md)를 에이전트의 시스템 프롬프트로 변환하고 그 `scripts/`를 호출 가능한 도구로 노출합니다. `agent/` 안의 어떤 것도 문서 검증에 특화된 것이 아닙니다 — 에이전트의 동작을 바꾸려면 `skill/SKILL.md`를 편집해야 하며, wrapper 코드를 건드릴 필요는 없습니다. 유일한 예외는 [`drive_tool.py`](agent/drive_tool.py)입니다: 이것은 OAuth 동의 흐름을 구동하기 위해 ADK의 `ToolContext`가 필요한데, 이는 정식 ADK FunctionTool에서만 존재하며 `start_job`/`check_job`으로 호출되는 서브프로세스 스크립트에는 존재하지 않습니다. `GOOGLE_OAUTH_CLIENT_ID`가 설정된 경우에만 등록됩니다(아래 "배포" 참조); 그렇지 않으면 에이전트는 `fetch_drive_file.py`로 대체됩니다.
+이 저장소는 **[Agent Plugins 1.0 Specification](https://agent-plugins.org/specification)**을 준수하는 이중 타겟 패키지로 구성되어 있습니다:
+1. **Google Antigravity 플러그인 & 스킬 (`skills/document-validator/`)**: 로컬 CLI / IDE 에이전트 실행을 위한 단일 진실 공급원(SSOT) 역할을 합니다.
+2. **Gemini Enterprise 클라우드 에이전트 (`gemini-enterprise/`)**: ADK wrapper([`gemini-enterprise/agent/`](gemini-enterprise/agent/))와 동기화된 스킬 미러([`gemini-enterprise/skill/`](gemini-enterprise/skill/))를 분리하여 패키징합니다. `agent/` wrapper는 [`SKILL.md`](skills/document-validator/SKILL.md)를 에이전트의 시스템 프롬프트로 변환하고 `scripts/`를 `start_job`/`check_job` 도구로 노출합니다. `agent/` 안의 어떤 것도 문서 검증에 특화된 것이 아닙니다 — 에이전트의 동작을 바꾸려면 `skills/document-validator/SKILL.md`를 편집해야 하며, wrapper 코드를 건드릴 필요는 없습니다. 유일한 예외는 [`drive_tool.py`](gemini-enterprise/agent/drive_tool.py)입니다: 이는 OAuth 동의 흐름을 구동하기 위해 ADK의 `ToolContext`가 필요하며, `GOOGLE_OAUTH_CLIENT_ID`가 설정된 경우에만 등록됩니다; 그렇지 않으면 에이전트는 `fetch_drive_file.py`로 대체됩니다.
 
-## 평가
+## 평가 및 테스트
 
-`tests/test_*.py`는 wrapper의 메커니즘만 검사합니다(`start_job`이 실제로 스크립트를 실행하는지, 경로 탈출이 거부되는지 등) — LLM 출력은 본질적으로 비결정적이고 이런 종류의 pytest 단언은 본질적으로 불안정하기 때문에, 에이전트가 실제로 내리는 판단에 대해서는 절대 단언하지 않습니다. 준수/격차 분석 로직 자체가 "정확한지" — 올바른 판정, 올바르게 식별된 격차 — 는 [`google-agents-cli`](https://pypi.org/project/google-agents-cli/)의 평가 도구로 별도로 검증됩니다:
+### 단위 테스트 및 SSOT 동기화 확인
 
 ```bash
+python3 tests/check_core_sync.py
+pytest -v
+```
+
+### 행동 수준 평가 (`agents-cli eval`)
+
+`tests/test_*.py`는 wrapper와 스크립트의 메커니즘(`start_job` 실행, 경로 탈출 거부, PDF 추출, 비동기 채점)을 검사합니다. 준수/격차 분석 로직 자체가 "정확한지" — 올바른 판정, 올바르게 식별된 격차 — 는 `gemini-enterprise/` 내의 [`google-agents-cli`](https://pypi.org/project/google-agents-cli/) 평가 도구로 검증됩니다:
+
+```bash
+cd gemini-enterprise
 agents-cli eval generate   # tests/eval/datasets/basic-dataset.json에 대해 실제 에이전트를 실행
 agents-cli eval grade      # tests/eval/eval_config.yaml의 지표에 따라 이 트레이스를 채점
 ```
 
-`gcloud auth application-default login`과 `GOOGLE_CLOUD_PROJECT`(`--project`로 재정의 가능)가 필요합니다 — 실제 Gemini 모델을 호출합니다. 미리 마련된 세 가지 케이스는 승인, 필수 요건 누락, 결격 조건 케이스를 각각 다룹니다; 스킬이 발전함에 따라 `tests/eval/datasets/` 아래에 더 추가하세요. 데이터셋 스키마, 지표 작성법, 실패 케이스 기반 반복 작업 흐름에 대해서는 `agents-cli eval --help`와 `google-agents-cli-eval` 스킬을 참고하세요.
+`gcloud auth application-default login`과 `GOOGLE_CLOUD_PROJECT`(`--project`로 재정의 가능)가 필요합니다 — 실제 Gemini 모델(`gemini-3.8-flash`)을 호출합니다. 미리 마련된 세 가지 케이스는 승인, 필수 요건 누락, 결격 조건 케이스를 각각 다룹니다; 스킬이 발전함에 따라 `gemini-enterprise/tests/eval/datasets/` 아래에 더 추가하세요. 데이터셋 스키마, 지표 작성법, 실패 케이스 기반 반복 작업 흐름에 대해서는 `agents-cli eval --help`와 `google-agents-cli-eval` 스킬을 참고하세요.
 
-## 배포
+---
 
-**1. 설정:**
+## 설치 및 배포
+
+실행 환경에 따라 아래 두 가지 배포 방법 중 하나를 선택하세요:
+
+| 배포 방법 | 대상 환경 | 설정 도구 | 주요 인터페이스 |
+| :--- | :--- | :--- | :--- |
+| **방법 1: Google Antigravity & Agent Plugins** | 로컬 Antigravity IDE 및 Agent Skill | `pip` / `uv` + `./setup.sh` | Antigravity IDE 채팅 |
+| **방법 2: Gemini Enterprise** | Cloud Vertex AI Agent Runtime | `./setup.sh` + `./deploy.sh` | Gemini Enterprise Web UI, Agent Engine |
+
+### 방법 1: Google Antigravity 플러그인 & 스킬 설치
+
+**Agent Plugins 1.0** 플러그인으로 설치하면 에이전트가 `skills/document-validator/`와 `rules/AGENTS.md`를 모두 자동으로 로드합니다:
 
 ```bash
-cp .env.example .env
+# 옵션 A: 전역 플러그인 설치 (모든 워크스페이스에서 사용 가능)
+mkdir -p ~/.gemini/config/plugins
+git clone https://github.com/sylphlin/document-validator.git ~/.gemini/config/plugins/document-validator
+
+# 옵션 B: 워크스페이스 플러그인 설치 (현재 프로젝트에만 적용)
+mkdir -p .agents/plugins
+git clone https://github.com/sylphlin/document-validator.git .agents/plugins/document-validator
+
+# 옵션 C: 기존 단일 스킬 디렉터리 설치 (~/.gemini/config/skills/ 호환)
+mkdir -p ~/.gemini/config/skills
+ln -s ~/.gemini/config/plugins/document-validator/skills/document-validator ~/.gemini/config/skills/document-validator
 ```
 
-`.env`를 편집합니다 — 최소한 `GOOGLE_CLOUD_PROJECT`와 `STAGING_BUCKET`을 설정하세요. 기준 또는 검토 대상 PDF가 큰 경우 `AGENT_MEMORY`(기본값 `8Gi`)를 늘리세요 — 메모리가 부족하면 컨테이너가 에러 로그 없이 조용히 OOM-killed됩니다.
-
-**2. 배포:**
+로컬 Python 의존성을 설치하고 Google Cloud 환경을 초기화합니다(Google Drive 가져오기 또는 비동기 검증 사용 시):
 
 ```bash
+cd ~/.gemini/config/plugins/document-validator
+pip install -e ".[dev]"
+./setup.sh --project <your-project-id>
+```
+
+### 방법 2: Gemini Enterprise 클라우드 배포
+
+#### 1. 클라우드 인프라 자동 프로비저닝 (`setup.sh`)
+
+`setup.sh`를 실행하면 필요한 GCP API 활성화, 세션 버킷(`gs://document-validator-sessions-${PROJECT_ID}`, 15일 수명 주기 자동 정리 포함) 및 스테이징 버킷(`gs://document-validator-staging-${PROJECT_ID}`) 생성 및 설정, Service Account IAM 권한 부여, `.env` 설정 기록이 자동으로 수행됩니다:
+
+```bash
+./setup.sh -p <your-project-id> -r us-central1
+# 변경 없이 실행할 작업 미리보기:
+./setup.sh --dry-run -p <your-project-id>
+```
+
+필요한 경우 `.env`를 편집합니다 — 기준 또는 검토 대상 PDF가 큰 경우 `AGENT_MEMORY`(기본값 `8Gi`)를 늘리세요. 메모리가 부족하면 컨테이너가 에러 로그 없이 조용히 OOM-killed됩니다.
+
+#### 2. Vertex AI Agent Engine 배포 및 Gemini Enterprise 등록 (`deploy.sh`)
+
+```bash
+# Vertex AI Agent Engine에 배포
 ./deploy.sh
-# 또는 .env를 수정하지 않고 project/region을 인자로 재정의:
+
+# 배포 후 agents-cli publish를 통해 Gemini Enterprise에 자동 등록
+./deploy.sh --project <your-project-id> --region us-central1 --ge <your-ge-app-id>
+
+# 또는 위치 인자로 project/region 재정의:
 ./deploy.sh <project-id> <region>
 ```
 
-이렇게 하면 로컬 가상 환경이 생성되고, `requirements.txt`가 설치되며, Google Cloud Agent Runtime(이전 명칭 Vertex AI Agent Engine)에 배포됩니다. 처음 실행 후 다시 배포하면 새 인스턴스를 만드는 대신 같은 인스턴스(`.env`의 `AGENT_ENGINE_ID`로 추적)가 업데이트됩니다.
+`deploy.sh`는 `gemini-enterprise/agent`와 `gemini-enterprise/skill`을 함께 스테이징하고, `adk deploy agent_engine`으로 배포하며, `AGENT_ENGINE_ID`를 `.env`에 저장하고, `gemini-enterprise/deployment_metadata.json`을 작성합니다. 첫 실행 후 다시 배포하면 기존 Agent Engine 인스턴스가 제자리에서 업데이트됩니다.
 
-**3. Gemini Enterprise에 등록** (선택): `deploy.sh` 출력 끝에 출력되는 Reasoning Engine Resource ID를 따라 Gemini Enterprise 관리자 콘솔에서 사용자 정의 에이전트로 연결하세요.
+#### 3. Google Drive 접근 권한 및 세션 영속성 참고 사항
 
-**실제 사용을 위해 배포하기 전 반드시 확인할 것:** 기본 Google Drive 가져오기 경로는 배포된 service account가 검토자가 링크할 파일에 실제로 접근 권한이 있어야 합니다 — 위 Phase 0 설명을 참고하세요. 파일을 service account의 이메일 주소로 공유하세요; "링크를 아는 누구나 접근 가능"한 공유는 필요하지 않으며, 민감한 행정 문서에는 보통 사용하지 않아야 합니다.
-
-**선택 사항 — service account 대신 사용자 개인으로 Drive 접근:** `.env`에서 `GOOGLE_OAUTH_CLIENT_ID`/`GOOGLE_OAUTH_CLIENT_SECRET`(`.env.example` 참고)을 설정하면 `agent/drive_tool.py`가 활성화됩니다. 이를 설정하면 에이전트는 Gemini Enterprise를 통해 로그인한 사용자로서 Drive에 접근합니다 — 해당 사용자의 파일은 평소처럼 그 사용자에게 공유되어 있으면 되고, service account에 별도로 공유할 필요가 없습니다. Google Cloud Console → APIs & Services → Credentials에서 OAuth 클라이언트(유형은 "웹 애플리케이션", Drive API 활성화, 동의 화면 범위는 `drive.readonly`)를 생성하세요. 둘 다 비워두면 이 기능을 건너뛰고 위의 service account 경로를 사용합니다.
-
-Agent Engine 컨테이너 인스턴스는 일시적이며 같은 대화의 turn 사이에 교체될 수 있습니다. 로컬 디스크에만 저장된 파일(직접 업로드 또는 추출 상태)은 이를 견디지 못합니다. `scripts/gcs_state.py`는 다른 영속적 저장 수단이 없는 것들(SKILL.md §0.0과 §1 참고)을 `document-validator-sessions-{GOOGLE_CLOUD_PROJECT}`라는 이름의 GCS 버킷에 백업합니다. 배포 전에 한 번 생성하고 배포된 service account에 쓰기 권한을 부여하세요:
-
-```bash
-gsutil mb gs://document-validator-sessions-your-project-id
-gsutil iam ch serviceAccount:your-deployed-sa@your-project-id.iam.gserviceaccount.com:roles/storage.objectAdmin gs://document-validator-sessions-your-project-id
-```
-
-### 로컬 개발
-
-```bash
-pip install -e ".[dev]"
-pytest -v
-```
+- **Service Account Drive 접근 (기본값):** 기본 Google Drive 가져오기 경로(`fetch_drive_file.py`)는 배포된 service account가 검토자가 링크할 파일에 접근 권한을 가지고 있어야 합니다. 대상 파일/폴더를 service account의 이메일 주소로 공유하세요; "링크를 아는 누구나 접근 가능"한 공개 공유는 필요하지 않습니다.
+- **사용자 개인 OAuth Drive 접근 (선택 사항):** `.env`에서 `GOOGLE_OAUTH_CLIENT_ID`와 `GOOGLE_OAUTH_CLIENT_SECRET`(`.env.example` 참고)을 설정하면 [`gemini-enterprise/agent/drive_tool.py`](gemini-enterprise/agent/drive_tool.py)가 활성화되어 Gemini Enterprise에 로그인한 사용자로서 Drive에 접근합니다. Google Cloud Console → APIs & Services → Credentials에서 OAuth 클라이언트(유형은 "웹 애플리케이션", Drive API 활성화, 동의 화면 범위는 `drive.readonly`)를 생성하세요. 둘 다 비워두면 service account 경로를 사용합니다.
+- **임시 컨테이너 상태 백업 및 복원 (`gcs_state.py` & `recall.py`):** Agent Engine 컨테이너 인스턴스는 일시적이며 같은 대화의 turn 사이에 교체될 수 있습니다. `gcs_state.py`는 업로드된 파일과 추출 상태를 `gs://document-validator-sessions-{GOOGLE_CLOUD_PROJECT}`(`./setup.sh`가 자동 생성)에 백업하며, `recall.py`는 컨테이너 교체 시 이를 투명하게 복원합니다.

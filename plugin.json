@@ -1,0 +1,25 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "document-validator",
+  "version": "1.0.0",
+  "description": "Systematic document compliance and audit suite. Extracts structured requirement checklists from criteria documents (regulations, tender specs, review-committee comments, checklists), evaluates pending submission packages with page-level PDF/CAD extraction and Google Drive integration, and generates confidence-scored gap analysis and disposition reports.",
+  "author": {
+    "name": "sylphlin",
+    "url": "https://github.com/sylphlin"
+  },
+  "homepage": "https://github.com/sylphlin/document-validator",
+  "repository": "https://github.com/sylphlin/document-validator",
+  "license": "MIT",
+  "keywords": [
+    "document-validation",
+    "compliance-audit",
+    "gap-analysis",
+    "tender-review",
+    "regulation-check",
+    "pdf-extraction",
+    "google-drive",
+    "gemini",
+    "vertex-ai",
+    "adk"
+  ]
+}

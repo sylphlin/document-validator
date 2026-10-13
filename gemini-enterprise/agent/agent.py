@@ -13,7 +13,7 @@ from .recall import build_recall_callback
 load_dotenv()
 
 # Override GOOGLE_CLOUD_LOCATION for model calls (Dockerfile sets us-central1 for Agent Runtime,
-# but gemini-3.5-flash requires the global endpoint)
+# but gemini-3.8-flash requires the global endpoint)
 os.environ["GOOGLE_GENAI_USE_VERTEXAI"] = "true"
 os.environ["GOOGLE_CLOUD_LOCATION"] = os.getenv("MODEL_LOCATION", "global")
 
@@ -123,7 +123,7 @@ def build_agent(skill_dir: Path = _DEFAULT_SKILL_DIR) -> LlmAgent:
         # makes enough model calls that hitting a transient 429 is expected,
         # not exceptional.
         model=Gemini(
-            model=os.getenv("MODEL", "gemini-3.5-flash"),
+            model=os.getenv("MODEL", "gemini-3.8-flash"),
             retry_options=types.HttpRetryOptions(
                 attempts=5, initial_delay=1, max_delay=30, exp_base=2, jitter=1,
                 http_status_codes=[429, 500, 502, 503, 504],

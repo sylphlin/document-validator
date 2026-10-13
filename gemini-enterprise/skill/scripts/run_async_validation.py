@@ -114,7 +114,7 @@ def _build_checklist(extracted_md, rules, response_language=""):
         "Output only the checklist table and any per-row notes the rules require."
     )
     resp = client.models.generate_content(
-        model=os.environ.get("MODEL", "gemini-3.5-flash"), contents=prompt
+        model=os.environ.get("MODEL", "gemini-3.8-flash"), contents=prompt
     )
     return resp.text
 

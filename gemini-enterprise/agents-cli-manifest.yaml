@@ -1,5 +1,5 @@
 name: "document-validator"
-acli_version: "0.5.0"
+acli_version: "1.9.0"
 agent_directory: "agent"
 region: "us-central1"
 base_template: "adk"
@@ -10,4 +10,4 @@ create_params:
   cicd_runner: "skip"
   include_data_ingestion: false
   datastore: "none"
-  agent_guidance_filename: "CLAUDE.md"
+  agent_guidance_filename: "GEMINI.md"

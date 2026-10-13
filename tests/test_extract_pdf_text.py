@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-MODULE_PATH = Path(__file__).parent.parent / "skill" / "scripts" / "extract_pdf_text.py"
+MODULE_PATH = Path(__file__).parent.parent / "skills" / "document-validator" / "scripts" / "extract_pdf_text.py"
 
 
 def _load_module():

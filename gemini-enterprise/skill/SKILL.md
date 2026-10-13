@@ -9,6 +9,12 @@ description: >
   involving checking a document against rules or criteria — not necessarily a
   government regulation. Use whenever both criteria and a document to check are
   present in context, even if phrased casually.
+metadata:
+  version: "1.0.0"
+  author: "sylphlin"
+  repository: "https://github.com/sylphlin/document-validator"
+  category: "document-compliance"
+  specification: "https://agentskills.io/specification"
 ---
 
 # Document Validator Skill
@@ -57,13 +63,23 @@ transliterated, regardless of response language.
 
 ## Running Scripts
 
-This skill bundles exactly two scripts: `extract_pdf_text.py` and
-`fetch_drive_file.py`. If a step below doesn't name one of these, do it by
-reasoning directly — there is no script for it. Commands are shown as
-`python3 scripts/{name}.py ...`; whatever tool actually runs them takes the bare
-filename, not the `scripts/` or `python3` prefix shown.
+This skill bundles two primary scripts: `extract_pdf_text.py` and
+`fetch_drive_file.py` (plus `gcs_state.py` for cloud session persistence). If a
+step below doesn't name one of these, do it by reasoning directly — there is no
+script for it. Commands are shown as `python3 scripts/{name}.py ...`; whatever
+tool actually runs them takes the bare filename, not the `scripts/` or `python3`
+prefix shown.
 
-Every script call goes through two tools instead of one blocking call:
+**In a local CLI / IDE plugin environment (Google Antigravity, Claude Code, etc.)**
+where `start_job` is not present: resolve `<PLUGIN_ROOT>` as two directory levels
+above `skills/document-validator/SKILL.md` (`../../`), run
+`python3 skills/document-validator/scripts/{name}.py ...` directly from
+`<PLUGIN_ROOT>`, and skip `gcs_state.py` / `start_async_validation` (local files
+persist across turns without container-swap risk).
+
+**In a deployed ADK agent (Gemini Enterprise / Agent Runtime)** where
+`start_job` and `check_job` are provided: every script call goes through those
+two tools instead of one blocking call:
 **`start_job`** launches it in the background and returns a `job_id`;
 **`check_job`** polls that `job_id`. This decouples a script's real duration from
 the chat surface's own per-turn timeout, which is unrelated to — and often
