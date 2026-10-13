@@ -68,9 +68,9 @@ def cmd_upload_file(args):
         bucket.blob(path).upload_from_filename(args.file)
     except NotFound:
         print(
-            f"[error] bucket '{get_bucket_name()}' not found. Create it once "
-            "(e.g. `gsutil mb gs://...`) and grant the deployed service "
-            "account write access — this script does not create buckets.",
+            f"[error] bucket '{get_bucket_name()}' not found. Run `./setup.sh` once "
+            "to create it and grant the deployed service account write access — "
+            "this script does not create buckets.",
             file=sys.stderr,
         )
         sys.exit(1)
@@ -107,8 +107,8 @@ def cmd_write_state(args):
         bucket.blob(path).upload_from_string(data, content_type="application/json")
     except NotFound:
         print(
-            f"[error] bucket '{get_bucket_name()}' not found. Create it once "
-            "and grant the deployed service account write access.",
+            f"[error] bucket '{get_bucket_name()}' not found. Run `./setup.sh` once "
+            "to create it and grant the deployed service account write access.",
             file=sys.stderr,
         )
         sys.exit(1)

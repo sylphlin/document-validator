@@ -44,7 +44,9 @@ gemini-enterprise/
 ├── agents-cli-manifest.yaml      # agents-cli manifest (agent_directory: agent, target: agent_runtime)
 ├── deployment_metadata.json      # Tracks deployed Reasoning Engine resource name for agents-cli publish
 ├── deploy.sh                     # Wrapper forwarding to root ../deploy.sh
+├── GEMINI.md                     # Coding agent guide for the Gemini Enterprise package
 ├── .env.example                  # Environment configuration template
+├── .gitignore                    # Package-level ignore rules
 ├── pyproject.toml                # Package and evaluation dependencies
 └── requirements.txt              # Runtime dependencies installed in Agent Runtime container
 ```

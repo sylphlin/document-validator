@@ -1,7 +1,5 @@
 # tests/test_tools.py
 import time
-import pytest
-from pathlib import Path
 from agent.tools import make_tools
 
 

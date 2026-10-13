@@ -1,6 +1,5 @@
 # tests/test_job_store.py
 import importlib.util
-import json
 from pathlib import Path
 
 import pytest

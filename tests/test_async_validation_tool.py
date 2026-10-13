@@ -1,6 +1,4 @@
 # tests/test_async_validation_tool.py
-from pathlib import Path
-
 from agent.tools import make_tools
 
 

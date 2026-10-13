@@ -195,18 +195,19 @@ document-validator/
 │   └── document-validator/
 │       ├── SKILL.md                # 各階段、要求類型、報告格式、執行準則
 │       └── scripts/
-│           ├── extract_pdf_text.py       # PDF → Markdown 擷取
+│           ├── extract_pdf_text.py       # PDF → Markdown 擷取（多程序平行處理 + CAD 快速通道）
 │           ├── fetch_drive_file.py       # Google Drive API 擷取（service account / ADC）
-│           ├── gcs_state.py              # 將沒有其他持久來源的檔案/狀態備份到 GCS
-│           └── run_async_validation.py   # Map-Reduce 批次符合性評分（預設 gemini-3.8-flash）
+│           ├── gcs_state.py              # 將直接上傳的檔案與狀態備份/還原至 GCS
+│           ├── job_store.py              # 背景作業的 GCS 狀態紀錄與單次原子交付（atomic deliver-once）
+│           └── run_async_validation.py   # 脫離式背景查核標準擷取與查核清單建構（預設 gemini-3.8-flash）
 ├── gemini-enterprise/              # 獨立隔離的 Gemini Enterprise 雲端代理人套件
 │   ├── agent/                      # ADK wrapper — 載入 skill/SKILL.md 作為系統提示詞
 │   │   ├── __init__.py             # 匯出 root_agent 供 ADK 載入器使用
 │   │   ├── agent.py                # LlmAgent 建構（預設使用 gemini-3.8-flash）
 │   │   ├── drive_tool.py           # fetch_drive_file_oauth — 以使用者個人 OAuth 存取 Drive（僅部署環境）
-│   │   ├── recall.py               # 容器替換後自動從 GCS 還原工作階段檔案
+│   │   ├── recall.py               # 透過 before_agent_callback 自動回傳背景完成的查核清單或接續中斷作業
 │   │   ├── skill_loader.py         # SKILL.md frontmatter 解析器
-│   │   └── tools.py                # start_job/check_job（背景腳本執行）與 read_asset
+│   │   └── tools.py                # start_job、check_job、read_asset 與 start_async_validation
 │   ├── skill/                      # skills/document-validator/ 的下游鏡像（由 check_core_sync.py 驗證同步）
 │   ├── tests/
 │   │   └── eval/                   # 供 `agents-cli eval` 使用的行為層級評估
@@ -215,9 +216,11 @@ document-validator/
 │   ├── agents-cli-manifest.yaml    # 供 `agents-cli eval` 與 `agents-cli publish` 使用的描述檔
 │   ├── deployment_metadata.json    # 由 deploy.sh 自動更新，供 `agents-cli publish gemini-enterprise` 讀取
 │   ├── deploy.sh                   # 轉發至根目錄 ./deploy.sh 的便捷腳本
+│   ├── GEMINI.md                   # Gemini Enterprise 套件開發與評估指南
 │   ├── requirements.txt            # 安裝進部署容器的執行期相依套件
 │   ├── pyproject.toml              # Gemini Enterprise 套件設定
-│   └── .env.example                # 雲端環境變數範本
+│   ├── .env.example                # 雲端環境變數範本
+│   └── .gitignore                  # 套件層級 Git 忽略規則
 ├── tests/                          # 單元測試與 SSOT 同步檢查
 │   ├── check_core_sync.py          # 驗證 skills/document-validator/ 與 gemini-enterprise/skill/ 完全一致
 │   └── test_*.py                   # Wrapper 與腳本單元測試
@@ -301,7 +304,7 @@ pip install -e ".[dev]"
 ./setup.sh --dry-run -p <your-project-id>
 ```
 
-如有需要可編輯 `.env` — 若查核標準或待查 PDF 檔案很大，請調高 `AGENT_MEMORY`（預設 `8Gi`），因為容器記憶體不足時會被靜默 OOM-killed。
+如有需要可編輯 `.env` — 若查核標準或待查 PDF 檔案非常龐大，可視需求調整 `AGENT_MEMORY`（預設 `32Gi`），因為容器記憶體不足時會被靜默 OOM-killed。
 
 #### 2. 部署至 Vertex AI Agent Engine 並註冊至 Gemini Enterprise（`deploy.sh`）
 
@@ -322,4 +325,4 @@ pip install -e ".[dev]"
 
 - **Service Account 存取 Drive（預設）：** 預設的 Google Drive 擷取路徑（`fetch_drive_file.py`）需要部署用的 service account 具備審查者所提供連結檔案的讀取權限。請將目標 Drive 檔案或資料夾分享給該 service account 的電子郵件地址；不需要開啟「知道連結的任何人皆可存取」。
 - **以使用者個人 OAuth 存取 Drive（選用）：** 在 `.env` 中設定 `GOOGLE_OAUTH_CLIENT_ID` 與 `GOOGLE_OAUTH_CLIENT_SECRET`（見 `.env.example`）即可啟用 [`gemini-enterprise/agent/drive_tool.py`](gemini-enterprise/agent/drive_tool.py)。設定後，代理人會以透過 Gemini Enterprise 登入的使用者身分存取 Drive。請在 Google Cloud Console → APIs & Services → Credentials 中建立 OAuth 用戶端（類型選「網頁應用程式」，啟用 Drive API，同意畫面範圍設為 `drive.readonly`）。兩者皆留空則使用上方的 service account 路徑。
-- **短暫容器狀態備份與還原（`gcs_state.py` 與 `recall.py`）：** Agent Engine 的容器執行個體是暫時性的，同一段對話的不同回合之間可能會被替換。`gcs_state.py` 會將直接上傳的檔案與擷取狀態備份至 `gs://document-validator-sessions-{GOOGLE_CLOUD_PROJECT}`（由 `./setup.sh` 自動建立），而 `recall.py` 會在容器替換時自動還原這些檔案。
+- **短暫容器狀態備份與背景作業召回（`gcs_state.py`、`job_store.py` 與 `recall.py`）：** Agent Engine 的容器執行個體是暫時性的，同一段對話的不同回合之間可能會被替換。`gcs_state.py` 會將直接上傳的檔案與檢查點狀態備份並還原自 `gs://document-validator-sessions-{GOOGLE_CLOUD_PROJECT}`（由 `./setup.sh` 自動建立）；而 `job_store.py` 與 `recall.py` 則負責追蹤脫離式背景查核標準擷取作業（`run_async_validation.py`），在使用者下一回合發訊時自動交付完成的查核清單或自動接續中斷的作業。

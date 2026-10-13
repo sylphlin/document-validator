@@ -1,4 +1,3 @@
-# skill/scripts/job_store.py
 """GCS-backed job records for async validation, with atomic deliver-once.
 
 Shared by run_async_validation.py (writes status/progress/heartbeat/result)
@@ -9,7 +8,6 @@ live in the same bucket as gcs_state.py: document-validator-sessions-{PROJECT}.
 import json
 import os
 import time
-import uuid
 
 
 def _bucket_name():
@@ -31,10 +29,6 @@ def _job_path(user_id, session_id, job_id):
 
 def _index_path(user_id):
     return f"{user_id}/job_index.json"
-
-
-def new_job_id():
-    return uuid.uuid4().hex[:12]
 
 
 def write_job(user_id, session_id, record, bucket=None):

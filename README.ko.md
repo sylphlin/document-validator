@@ -195,18 +195,19 @@ document-validator/
 │   └── document-validator/
 │       ├── SKILL.md                # 각 단계, 요구사항 유형, 보고서 형식, 실행 가이드라인
 │       └── scripts/
-│           ├── extract_pdf_text.py       # PDF → Markdown 추출
+│           ├── extract_pdf_text.py       # PDF → Markdown 추출 (병렬 워커 + CAD 고속 경로)
 │           ├── fetch_drive_file.py       # Google Drive API 가져오기 (service account / ADC)
-│           ├── gcs_state.py              # 다른 영속적 저장 수단이 없는 파일/상태를 GCS에 백업
-│           └── run_async_validation.py   # Map-Reduce 배치 적합성 채점 (기본값 gemini-3.8-flash)
+│           ├── gcs_state.py              # 직접 업로드된 파일 및 체크포인트 상태를 GCS에 백업/복원
+│           ├── job_store.py              # 비동기 작업의 GCS 상태 기록 및 원자적 1회 전달(atomic deliver-once)
+│           └── run_async_validation.py   # 분리형 백그라운드 기준 추출 및 체크리스트 생성 (기본값 gemini-3.8-flash)
 ├── gemini-enterprise/              # 격리된 Gemini Enterprise 클라우드 에이전트 패키지
 │   ├── agent/                      # ADK wrapper — skill/SKILL.md를 시스템 프롬프트로 로드
 │   │   ├── __init__.py             # ADK 로더용 root_agent 내보내기
 │   │   ├── agent.py                # LlmAgent 구성 (기본값 gemini-3.8-flash)
 │   │   ├── drive_tool.py           # fetch_drive_file_oauth — 사용자 개인 OAuth로 Drive 접근(배포 환경 전용)
-│   │   ├── recall.py               # 컨테이너 교체 후 GCS에서 세션 파일 자동 복원
+│   │   ├── recall.py               # before_agent_callback을 통해 완료된 백그라운드 작업 결과 전달 또는 중단된 작업 재개
 │   │   ├── skill_loader.py         # SKILL.md frontmatter 파서
-│   │   └── tools.py                # start_job/check_job(백그라운드 스크립트 실행)과 read_asset
+│   │   └── tools.py                # start_job, check_job, read_asset 및 start_async_validation
 │   ├── skill/                      # skills/document-validator/의 다운스트림 미러 (check_core_sync.py로 검증)
 │   ├── tests/
 │   │   └── eval/                   # `agents-cli eval`용 행동 수준 평가
@@ -215,9 +216,11 @@ document-validator/
 │   ├── agents-cli-manifest.yaml    # `agents-cli eval` 및 `agents-cli publish`용 매니페스트
 │   ├── deployment_metadata.json    # deploy.sh가 자동 업데이트하며 `agents-cli publish gemini-enterprise`에서 사용
 │   ├── deploy.sh                   # 루트 ./deploy.sh로 전달하는 편의 스크립트
+│   ├── GEMINI.md                   # Gemini Enterprise 패키지 개발 및 평가 가이드
 │   ├── requirements.txt            # 배포된 컨테이너에 설치되는 런타임 의존성
 │   ├── pyproject.toml              # Gemini Enterprise 패키지 설정
-│   └── .env.example                # 클라우드 환경 변수 템플릿
+│   ├── .env.example                # 클라우드 환경 변수 템플릿
+│   └── .gitignore                  # 패키지 수준 Git 무시 규칙
 ├── tests/                          # 단위 테스트 및 SSOT 동기화 검증
 │   ├── check_core_sync.py          # skills/document-validator/와 gemini-enterprise/skill/의 일치 여부 검증
 │   └── test_*.py                   # Wrapper 및 스크립트 단위 테스트
@@ -301,7 +304,7 @@ pip install -e ".[dev]"
 ./setup.sh --dry-run -p <your-project-id>
 ```
 
-필요한 경우 `.env`를 편집합니다 — 기준 또는 검토 대상 PDF가 큰 경우 `AGENT_MEMORY`(기본값 `8Gi`)를 늘리세요. 메모리가 부족하면 컨테이너가 에러 로그 없이 조용히 OOM-killed됩니다.
+필요한 경우 `.env`를 편집합니다 — 기준 또는 검토 대상 PDF가 매우 큰 경우 `AGENT_MEMORY`(기본값 `32Gi`)를 조정하세요. 메모리가 부족하면 컨테이너가 에러 로그 없이 조용히 OOM-killed됩니다.
 
 #### 2. Vertex AI Agent Engine 배포 및 Gemini Enterprise 등록 (`deploy.sh`)
 
@@ -322,4 +325,4 @@ pip install -e ".[dev]"
 
 - **Service Account Drive 접근 (기본값):** 기본 Google Drive 가져오기 경로(`fetch_drive_file.py`)는 배포된 service account가 검토자가 링크할 파일에 접근 권한을 가지고 있어야 합니다. 대상 파일/폴더를 service account의 이메일 주소로 공유하세요; "링크를 아는 누구나 접근 가능"한 공개 공유는 필요하지 않습니다.
 - **사용자 개인 OAuth Drive 접근 (선택 사항):** `.env`에서 `GOOGLE_OAUTH_CLIENT_ID`와 `GOOGLE_OAUTH_CLIENT_SECRET`(`.env.example` 참고)을 설정하면 [`gemini-enterprise/agent/drive_tool.py`](gemini-enterprise/agent/drive_tool.py)가 활성화되어 Gemini Enterprise에 로그인한 사용자로서 Drive에 접근합니다. Google Cloud Console → APIs & Services → Credentials에서 OAuth 클라이언트(유형은 "웹 애플리케이션", Drive API 활성화, 동의 화면 범위는 `drive.readonly`)를 생성하세요. 둘 다 비워두면 service account 경로를 사용합니다.
-- **임시 컨테이너 상태 백업 및 복원 (`gcs_state.py` & `recall.py`):** Agent Engine 컨테이너 인스턴스는 일시적이며 같은 대화의 turn 사이에 교체될 수 있습니다. `gcs_state.py`는 업로드된 파일과 추출 상태를 `gs://document-validator-sessions-{GOOGLE_CLOUD_PROJECT}`(`./setup.sh`가 자동 생성)에 백업하며, `recall.py`는 컨테이너 교체 시 이를 투명하게 복원합니다.
+- **임시 컨테이너 상태 백업 및 백그라운드 작업 복원 (`gcs_state.py`, `job_store.py` & `recall.py`):** Agent Engine 컨테이너 인스턴스는 일시적이며 같은 대화의 turn 사이에 교체될 수 있습니다. `gcs_state.py`는 직접 업로드된 파일과 체크포인트 상태를 `gs://document-validator-sessions-{GOOGLE_CLOUD_PROJECT}`(`./setup.sh`가 자동 생성)에 백업 및 복원하며, `job_store.py`와 `recall.py`는 분리형 백그라운드 기준 추출 작업(`run_async_validation.py`)을 추적하여 사용자의 다음 turn에서 완료된 체크리스트를 자동으로 전달하거나 중단된 작업을 재개합니다.

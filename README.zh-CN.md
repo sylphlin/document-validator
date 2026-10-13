@@ -195,18 +195,19 @@ document-validator/
 │   └── document-validator/
 │       ├── SKILL.md                # 各阶段、要求类型、报告格式、执行准则
 │       └── scripts/
-│           ├── extract_pdf_text.py       # PDF → Markdown 提取
+│           ├── extract_pdf_text.py       # PDF → Markdown 提取（多进程并行处理 + CAD 快速通道）
 │           ├── fetch_drive_file.py       # Google Drive API 获取（service account / ADC）
-│           ├── gcs_state.py              # 将没有其他持久来源的文件/状态备份到 GCS
-│           └── run_async_validation.py   # Map-Reduce 批量合规评分（默认 gemini-3.8-flash）
+│           ├── gcs_state.py              # 将直接上传的文件与状态备份/恢复至 GCS
+│           ├── job_store.py              # 后台作业的 GCS 状态记录与单次原子交付（atomic deliver-once）
+│           └── run_async_validation.py   # 脱离式后台核查标准提取与核查清单构建（默认 gemini-3.8-flash）
 ├── gemini-enterprise/              # 独立隔离的 Gemini Enterprise 云端代理套件
 │   ├── agent/                      # ADK wrapper — 加载 skill/SKILL.md 作为系统提示词
 │   │   ├── __init__.py             # 导出 root_agent 供 ADK 加载器使用
 │   │   ├── agent.py                # LlmAgent 构建（默认使用 gemini-3.8-flash）
 │   │   ├── drive_tool.py           # fetch_drive_file_oauth — 以用户个人 OAuth 访问 Drive（仅部署环境）
-│   │   ├── recall.py               # 容器替换后自动从 GCS 恢复会话文件
+│   │   ├── recall.py               # 通过 before_agent_callback 自动返回后台完成的核查清单或接续中断作业
 │   │   ├── skill_loader.py         # SKILL.md frontmatter 解析器
-│   │   └── tools.py                # start_job/check_job（后台脚本执行）与 read_asset
+│   │   └── tools.py                # start_job、check_job、read_asset 与 start_async_validation
 │   ├── skill/                      # skills/document-validator/ 的下游镜像（由 check_core_sync.py 验证同步）
 │   ├── tests/
 │   │   └── eval/                   # 供 `agents-cli eval` 使用的行为层级评估
@@ -215,9 +216,11 @@ document-validator/
 │   ├── agents-cli-manifest.yaml    # 供 `agents-cli eval` 与 `agents-cli publish` 使用的描述文件
 │   ├── deployment_metadata.json    # 由 deploy.sh 自动更新，供 `agents-cli publish gemini-enterprise` 读取
 │   ├── deploy.sh                   # 转发至根目录 ./deploy.sh 的便捷脚本
+│   ├── GEMINI.md                   # Gemini Enterprise 套件开发与评估指南
 │   ├── requirements.txt            # 安装进部署容器的运行时依赖
 │   ├── pyproject.toml              # Gemini Enterprise 套件配置
-│   └── .env.example                # 云端环境变量模板
+│   ├── .env.example                # 云端环境变量模板
+│   └── .gitignore                  # 套件层级 Git 忽略规则
 ├── tests/                          # 单元测试与 SSOT 同步检查
 │   ├── check_core_sync.py          # 验证 skills/document-validator/ 与 gemini-enterprise/skill/ 完全一致
 │   └── test_*.py                   # Wrapper 与脚本单元测试
@@ -301,7 +304,7 @@ pip install -e ".[dev]"
 ./setup.sh --dry-run -p <your-project-id>
 ```
 
-如有需要可编辑 `.env` — 如果核查标准或待核查 PDF 文件很大，请调高 `AGENT_MEMORY`（默认 `8Gi`），因为容器内存不足时会被静默 OOM-killed。
+如有需要可编辑 `.env` — 如果核查标准或待核查 PDF 文件非常庞大，可视需求调整 `AGENT_MEMORY`（默认 `32Gi`），因为容器内存不足时会被静默 OOM-killed。
 
 #### 2. 部署至 Vertex AI Agent Engine 并注册至 Gemini Enterprise（`deploy.sh`）
 
@@ -322,4 +325,4 @@ pip install -e ".[dev]"
 
 - **Service Account 访问 Drive（默认）：** 默认的 Google Drive 获取路径（`fetch_drive_file.py`）需要部署用的 service account 具备审核人员所提供链接文件的读取权限。请将目标 Drive 文件或文件夹分享给该 service account 的电子邮件地址；不需要开启"知道链接的任何人均可访问"。
 - **以用户个人 OAuth 访问 Drive（可选）：** 在 `.env` 中设置 `GOOGLE_OAUTH_CLIENT_ID` 与 `GOOGLE_OAUTH_CLIENT_SECRET`（见 `.env.example`）即可启用 [`gemini-enterprise/agent/drive_tool.py`](gemini-enterprise/agent/drive_tool.py)。配置后，代理会以通过 Gemini Enterprise 登录的用户身份访问 Drive。请在 Google Cloud Console → APIs & Services → Credentials 中创建 OAuth 客户端（类型选"Web 应用"，启用 Drive API，同意屏幕范围设为 `drive.readonly`）。两者均留空则使用上方的 service account 路径。
-- **短暂容器状态备份与恢复（`gcs_state.py` 与 `recall.py`）：** Agent Engine 的容器实例是临时性的，同一段对话的不同轮次之间可能会被替换。`gcs_state.py` 会将直接上传的文件与提取状态备份至 `gs://document-validator-sessions-{GOOGLE_CLOUD_PROJECT}`（由 `./setup.sh` 自动创建），而 `recall.py` 会在容器替换时自动恢复这些文件。
+- **短暂容器状态备份与后台作业召回（`gcs_state.py`、`job_store.py` 与 `recall.py`）：** Agent Engine 的容器实例是临时性的，同一段对话的不同轮次之间可能会被替换。`gcs_state.py` 会将直接上传的文件与检查点状态备份并恢复自 `gs://document-validator-sessions-{GOOGLE_CLOUD_PROJECT}`（由 `./setup.sh` 自动创建）；而 `job_store.py` 与 `recall.py` 则负责追踪脱离式后台核查标准提取作业（`run_async_validation.py`），在用户下一轮次发消息时自动交付完成的核查清单或自动接续中断的作业。

@@ -195,18 +195,19 @@ document-validator/
 │   └── document-validator/
 │       ├── SKILL.md                # 各フェーズ、要件の種類、レポート形式、実行ガイドライン
 │       └── scripts/
-│           ├── extract_pdf_text.py       # PDF → Markdown 抽出
+│           ├── extract_pdf_text.py       # PDF → Markdown 抽出（並列ワーカー + CAD 高速パス）
 │           ├── fetch_drive_file.py       # Google Drive API での取得（service account / ADC）
-│           ├── gcs_state.py              # 他に永続化手段のないファイル/状態を GCS にバックアップ
-│           └── run_async_validation.py   # Map-Reduce バッチ適合性スコアリング（デフォルト gemini-3.8-flash）
+│           ├── gcs_state.py              # 直接アップロードされたファイルやチェックポイント状態を GCS にバックアップ・復元
+│           ├── job_store.py              # 非同期ジョブの GCS 状態記録およびアトミックな 1 回配信（atomic deliver-once）
+│           └── run_async_validation.py   # デタッチ型バックグラウンド基準抽出＆チェックリスト構築（デフォルト gemini-3.8-flash）
 ├── gemini-enterprise/              # 独立した Gemini Enterprise クラウドエージェントパッケージ
 │   ├── agent/                      # ADK wrapper — skill/SKILL.md をシステムプロンプトとして読み込む
 │   │   ├── __init__.py             # ADK ローダー用に root_agent をエクスポート
 │   │   ├── agent.py                # LlmAgent の構築（デフォルトは gemini-3.8-flash）
 │   │   ├── drive_tool.py           # fetch_drive_file_oauth — ユーザー個人の OAuth による Drive アクセス（デプロイ環境専用）
-│   │   ├── recall.py               # コンテナ入れ替え後に GCS からセッションファイルを自動復元
+│   │   ├── recall.py               # before_agent_callback 経由で完了したバックグラウンドジョブの結果返却や中断ジョブの再開を実行
 │   │   ├── skill_loader.py         # SKILL.md フロントマターのパーサー
-│   │   └── tools.py                # start_job/check_job（バックグラウンドスクリプト実行）と read_asset
+│   │   └── tools.py                # start_job、check_job、read_asset、および start_async_validation
 │   ├── skill/                      # skills/document-validator/ の下流ミラー（check_core_sync.py で検証）
 │   ├── tests/
 │   │   └── eval/                   # `agents-cli eval` 用の振る舞いレベル評価
@@ -215,9 +216,11 @@ document-validator/
 │   ├── agents-cli-manifest.yaml    # `agents-cli eval` および `agents-cli publish` 用のマニフェスト
 │   ├── deployment_metadata.json    # deploy.sh により自動更新、`agents-cli publish gemini-enterprise` で使用
 │   ├── deploy.sh                   # ルート ./deploy.sh に転送するラッパースクリプト
+│   ├── GEMINI.md                   # Gemini Enterprise パッケージ開発・評価ガイド
 │   ├── requirements.txt            # デプロイされるコンテナにインストールされるランタイム依存関係
 │   ├── pyproject.toml              # Gemini Enterprise パッケージ設定
-│   └── .env.example                # クラウド環境変数テンプレート
+│   ├── .env.example                # クラウド環境変数テンプレート
+│   └── .gitignore                  # パッケージレベルの Git 無視ルール
 ├── tests/                          # 単体テストおよび SSOT 同期検証
 │   ├── check_core_sync.py          # skills/document-validator/ と gemini-enterprise/skill/ の完全一致を検証
 │   └── test_*.py                   # Wrapper およびスクリプトの単体テスト
@@ -301,7 +304,7 @@ pip install -e ".[dev]"
 ./setup.sh --dry-run -p <your-project-id>
 ```
 
-必要に応じて `.env` を編集します — 基準文書や対象文書の PDF が大きい場合は `AGENT_MEMORY`（デフォルト `8Gi`）を増やしてください。メモリが不足するとコンテナはエラーログを残さず OOM-killed されます。
+必要に応じて `.env` を編集します — 基準文書や対象文書の PDF が非常に大きい場合は `AGENT_MEMORY`（デフォルト `32Gi`）を調整してください。メモリが不足するとコンテナはエラーログを残さず OOM-killed されます。
 
 #### 2. Vertex AI Agent Engine へのデプロイと Gemini Enterprise への登録（`deploy.sh`）
 
@@ -322,4 +325,4 @@ pip install -e ".[dev]"
 
 - **Service Account による Drive アクセス（デフォルト）：** デフォルトの Google Drive 取得経路（`fetch_drive_file.py`）では、デプロイされた service account がレビュアーのリンク先ファイルにアクセス権を持っている必要があります。対象ファイル・フォルダを service account のメールアドレスに共有してください；「リンクを知っている全員」への公開共有は不要です。
 - **ユーザー個人の OAuth による Drive アクセス（オプション）：** `.env` で `GOOGLE_OAUTH_CLIENT_ID` と `GOOGLE_OAUTH_CLIENT_SECRET`（`.env.example` 参照）を設定すると [`gemini-enterprise/agent/drive_tool.py`](gemini-enterprise/agent/drive_tool.py) が有効になり、Gemini Enterprise にサインインしているユーザーとして Drive にアクセスします。Google Cloud Console → APIs & Services → Credentials で OAuth クライアント（種類は「ウェブ アプリケーション」、Drive API を有効化、同意画面のスコープは `drive.readonly`）を作成してください。両方空のままにすると service account 経路が使用されます。
-- **一時コンテナの状態バックアップと復元（`gcs_state.py` と `recall.py`）：** Agent Engine のコンテナインスタンスは一時的であり、同じ会話のターン間で入れ替わることがあります。`gcs_state.py` はアップロードされたファイルと抽出状態を `gs://document-validator-sessions-{GOOGLE_CLOUD_PROJECT}`（`./setup.sh` が自動作成）にバックアップし、`recall.py` はコンテナ入れ替え時にそれらを透過的に復元します。
+- **一時コンテナの状態バックアップとバックグラウンドジョブの復元（`gcs_state.py`、`job_store.py`、`recall.py`）：** Agent Engine のコンテナインスタンスは一時的であり、同じ会話のターン間で入れ替わることがあります。`gcs_state.py` は直接アップロードされたファイルとチェックポイント状態を `gs://document-validator-sessions-{GOOGLE_CLOUD_PROJECT}`（`./setup.sh` が自動作成）にバックアップ・復元し、`job_store.py` と `recall.py` はデタッチ型バックグラウンド基準抽出ジョブ（`run_async_validation.py`）を追跡して、次のターンで完了したチェックリストの自動配信や中断ジョブの再開を行います。

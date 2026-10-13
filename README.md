@@ -201,18 +201,19 @@ document-validator/
 │   └── document-validator/
 │       ├── SKILL.md                # Phases, requirement types, report format, execution guidelines
 │       └── scripts/
-│           ├── extract_pdf_text.py       # PDF → Markdown extraction
+│           ├── extract_pdf_text.py       # PDF → Markdown extraction (parallel workers + CAD fast path)
 │           ├── fetch_drive_file.py       # Google Drive API fetch (service account / ADC)
-│           ├── gcs_state.py              # Backs up files/state with no other durable source to GCS
-│           └── run_async_validation.py   # Map-Reduce batch conformance scoring (gemini-3.8-flash)
+│           ├── gcs_state.py              # Backs up and restores session files/checkpoints in GCS
+│           ├── job_store.py              # GCS-backed job records with atomic deliver-once for async jobs
+│           └── run_async_validation.py   # Detached background criteria extraction & checklist builder (gemini-3.8-flash)
 ├── gemini-enterprise/              # Isolated Gemini Enterprise Cloud Agent Package
 │   ├── agent/                      # ADK wrapper — loads skill/SKILL.md as the system prompt
 │   │   ├── __init__.py             # Exports root_agent for the ADK loader
 │   │   ├── agent.py                # LlmAgent construction (defaults to gemini-3.8-flash)
 │   │   ├── drive_tool.py           # fetch_drive_file_oauth — per-user OAuth Drive access (deployed only)
-│   │   ├── recall.py               # Automatic GCS session restoration after container swap
+│   │   ├── recall.py               # Surfaces completed background jobs or resumes stale jobs via before_agent_callback
 │   │   ├── skill_loader.py         # SKILL.md frontmatter parser
-│   │   └── tools.py                # start_job/check_job (background script execution) and read_asset
+│   │   └── tools.py                # start_job, check_job, read_asset, and start_async_validation
 │   ├── skill/                      # Downstream mirror of skills/document-validator/ (verified by check_core_sync.py)
 │   ├── tests/
 │   │   └── eval/                   # Behavior-level eval for `agents-cli eval`
@@ -221,9 +222,11 @@ document-validator/
 │   ├── agents-cli-manifest.yaml    # Manifest for `agents-cli eval` and `agents-cli publish`
 │   ├── deployment_metadata.json    # Auto-updated by deploy.sh for `agents-cli publish gemini-enterprise`
 │   ├── deploy.sh                   # Convenience wrapper forwarding to root ./deploy.sh
+│   ├── GEMINI.md                   # Coding agent guide for the Gemini Enterprise package
 │   ├── requirements.txt            # Runtime dependencies installed into the deployed container
 │   ├── pyproject.toml              # Gemini Enterprise package metadata
-│   └── .env.example                # Cloud environment template
+│   ├── .env.example                # Cloud environment template
+│   └── .gitignore                  # Package-level ignore rules
 ├── tests/                          # Unit tests & SSOT synchronization guard
 │   ├── check_core_sync.py          # Verifies skills/document-validator/ == gemini-enterprise/skill/
 │   └── test_*.py                   # Wrapper & script unit tests
@@ -307,7 +310,7 @@ Run `setup.sh` to automatically enable required GCP APIs, create and configure t
 ./setup.sh --dry-run -p <your-project-id>
 ```
 
-Edit `.env` if needed — bump `AGENT_MEMORY` (default `8Gi`) if criteria or pending-document PDFs run large, as the container is silently OOM-killed if it runs out of memory.
+Edit `.env` if needed — bump `AGENT_MEMORY` (default `32Gi`) if criteria or pending-document PDFs run exceptionally large, as the container is silently OOM-killed if it runs out of memory.
 
 #### 2. Deploy to Vertex AI Agent Engine & Register with Gemini Enterprise (`deploy.sh`)
 
@@ -328,4 +331,4 @@ Edit `.env` if needed — bump `AGENT_MEMORY` (default `8Gi`) if criteria or pen
 
 - **Service Account Drive Access (Default):** The default Google Drive fetch path (`fetch_drive_file.py`) requires the deployed service account to have access to the files reviewers link to. Share target Drive files/folders with the service account's email address; public "anyone with the link" sharing is not required.
 - **Per-User OAuth Drive Access (Optional):** Set `GOOGLE_OAUTH_CLIENT_ID` and `GOOGLE_OAUTH_CLIENT_SECRET` in `.env` (see `.env.example`) to enable [`gemini-enterprise/agent/drive_tool.py`](gemini-enterprise/agent/drive_tool.py). When configured, the agent accesses Drive as whichever user is signed in through Gemini Enterprise. Create the OAuth client in Google Cloud Console → APIs & Services → Credentials (type "Web application", Drive API enabled, consent screen scoped to `drive.readonly`). Leave both blank to use the service-account path.
-- **Ephemeral Container State (`gcs_state.py` & `recall.py`):** Agent Engine container instances are ephemeral and can be swapped between turns of the same conversation. `gcs_state.py` backs up uploaded files and extracted state to `gs://document-validator-sessions-{GOOGLE_CLOUD_PROJECT}` (created automatically by `./setup.sh`), and `recall.py` transparently restores them when a container swap occurs.
+- **Ephemeral Container State & Detached Job Recall (`gcs_state.py`, `job_store.py`, & `recall.py`):** Agent Engine container instances are ephemeral and can be swapped between turns of the same conversation. `gcs_state.py` backs up and restores directly-uploaded files and checkpointed state in `gs://document-validator-sessions-{GOOGLE_CLOUD_PROJECT}` (created automatically by `./setup.sh`), while `job_store.py` and `recall.py` track detached background criteria extraction jobs (`run_async_validation.py`) and automatically deliver completed checklists or resume interrupted jobs on the user's next turn.

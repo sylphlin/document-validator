@@ -34,8 +34,8 @@ def _available_scripts(scripts_dir: Path) -> list[str]:
     return sorted(p.name for p in scripts_dir.glob("*.py"))
 
 
-def make_tools(skill_dir: Path, timeout: int = 60):
-    """Return (start_job, check_job, read_asset) bound to skill_dir.
+def make_tools(skill_dir: Path, timeout: int = 300):
+    """Return (start_job, check_job, read_asset, start_async_validation) bound to skill_dir.
 
     Scripts run in a background thread so a single tool call never blocks the
     model for the script's full duration — start_job returns a job_id almost

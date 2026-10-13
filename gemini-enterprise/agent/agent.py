@@ -26,7 +26,7 @@ def _has_files(directory: Path) -> bool:
 
 def build_agent(skill_dir: Path = _DEFAULT_SKILL_DIR) -> LlmAgent:
     skill_body, metadata = load_skill(skill_dir)
-    timeout = int(os.getenv("SCRIPT_TIMEOUT_SECONDS", "60"))
+    timeout = int(os.getenv("SCRIPT_TIMEOUT_SECONDS", "300"))
     start_job, check_job, read_asset, start_async_validation = make_tools(skill_dir, timeout=timeout)
 
     # LlmAgent requires a valid Python identifier as name; sanitize all non-identifier chars
@@ -146,6 +146,5 @@ def build_agent(skill_dir: Path = _DEFAULT_SKILL_DIR) -> LlmAgent:
     )
 
 
-# Only instantiate if skill/ exists (Task 6 will create it)
 if _DEFAULT_SKILL_DIR.exists():
     root_agent = build_agent()
